@@ -1,0 +1,24 @@
+# SwiftUI
+.DS_Store
+build/
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+*.xcworkspace/*
+!*.xcworkspace/contents.xcworkspace
+DerivedData/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+env/
+
+# Standard
+docs
+legacy
+CLAUDE.md
