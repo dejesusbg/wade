@@ -7,6 +7,8 @@ build/
 *.xcworkspace/*
 !*.xcworkspace/contents.xcworkspace
 DerivedData/
+.build/
+.swiftpm/
 
 # Python
 __pycache__/
@@ -22,3 +24,4 @@ env/
 docs
 legacy
 CLAUDE.md
+.claude/worktrees/
