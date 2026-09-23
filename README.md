@@ -28,7 +28,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (16) and `cd backend && uv run pytest` (46).
+Tests: `cd app && swift test` (16) and `cd backend && uv run pytest` (47).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar glyph: dashed = not observing (backend down, setup unfinished, or no Accessibility
@@ -79,6 +79,10 @@ rare and the most valuable.
 No single non-error pattern can reach 0.5. The threshold stays there until Phase 3 measures
 what a Stage 2 check costs, then it can move toward firing more often.
 
+Known cheap false positive: coming back from a break (≥45s idle), then copy-pasting quickly
+between two apps, scores 0.35 + 0.15 = 0.50 and requests a `stuck` check. It costs one Stage 2
+look, never an interruption.
+
 Each check carries Stage 2's two inputs (§5.4):
 - **(a) context:** app, title, URL, excerpt, selection, recent error text
 - **(b) digest:** plain facts only, with the domain but never the page text
@@ -93,13 +97,18 @@ The backend logs `CHECK REQUESTED kind=… | digest`. Screen text is logged only
 **Scenarios** (`wade_backend.synthetic.SCENARIOS`): each states which kinds it must and must
 not produce.
 - **Stuck:** 4 scenarios, ≥ 0.56.
-- **Routine:** 8 scenarios, stuck ≤ 0.21 and only occasional audits.
+- **Routine:** 9 scenarios, stuck ≤ 0.35 and only occasional audits. They include
+  `fast_copy_paste`, shaped after a real session: Chrome↔Figma, a switch every 1–5s.
 - **Demo-derived opportunities:** repo page, cite a selection, read a paper, flight search,
   compare products.
 - **Non-moments:** quick glances, a one-word selection.
 
 The set is **constructed**, so passing it shows the rules behave as designed, not that they
 predict need. That's Phase 7.
+
+**First real sample** (14 min, 2026-09-23): 30 checks/hour (4 settled, 1 selection, 1 audit,
+1 stuck). The stuck check came from the developer's own test loop (Finder↔Chrome after an idle
+minute).
 
 Record and replay real sessions (the recording includes window titles and screen text, so
 it's opt-in, and `*.jsonl` is gitignored). The replay prints checks per hour by kind:

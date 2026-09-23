@@ -192,6 +192,14 @@ def copy_between_apps() -> Session:
     return s
 
 
+def fast_copy_paste() -> Session:
+    """Copying text piece by piece from a browser into a design tool: a switch every few seconds
+    for two minutes. Shape taken from a real on-device session (Chrome ↔ Figma, 1–5s apart)."""
+    s = Session().focus(CHROME, "notebook.ipynb").type(10, 3)
+    s.pingpong(CHROME, ("com.figma.Desktop", "Figma"), 30, 3.5, "notebook.ipynb", "Portfolio")
+    return s.type(20, 6)
+
+
 def one_off_error() -> Session:
     """A single error dialog, dismissed, then back to normal work."""
     s = Session().focus(MAIL, "Inbox").type(30, 10).error("send-failed-2b7c")
@@ -295,6 +303,7 @@ SCENARIOS: dict[str, Scenario] = {
     "reading": Scenario(reading, forbid=frozenset({"stuck"})),
     "tab_hopping": Scenario(tab_hopping, forbid=frozenset({"stuck"})),
     "copy_between_apps": Scenario(copy_between_apps, forbid=frozenset({"stuck"})),
+    "fast_copy_paste": Scenario(fast_copy_paste, forbid=frozenset({"stuck"})),
     "one_off_error": Scenario(one_off_error, forbid=frozenset({"stuck"})),
     "typo_fixes": Scenario(typo_fixes, forbid=frozenset({"stuck"})),
     "morning_startup": Scenario(morning_startup, forbid=frozenset({"stuck"})),
@@ -311,5 +320,5 @@ SCENARIOS: dict[str, Scenario] = {
 }
 
 STUCK = [name for name, sc in SCENARIOS.items() if "stuck" in sc.expect]
-ROUTINE = [name for name in ("focused_coding", "reading", "tab_hopping", "copy_between_apps",
+ROUTINE = [name for name in ("focused_coding", "reading", "tab_hopping", "copy_between_apps", "fast_copy_paste",
                              "one_off_error", "typo_fixes", "morning_startup", "errors_far_apart")]
