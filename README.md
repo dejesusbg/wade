@@ -66,9 +66,14 @@ Without a certificate it falls back to ad-hoc signing, with the requirement pinn
 built app claiming that id would inherit Wade's Accessibility access. It's fine for bootstrapping.
 
 Get a certificate once: Xcode → Settings → Accounts → your Apple ID → Manage Certificates…
-→ **+** → Apple Development. Then rebuild. macOS will ask for Accessibility once more,
-because the signature changed. Remove the old "Wade" entry in System Settings → Privacy &
-Security → Accessibility and grant the new one.
+→ **+** → Apple Development. If `security find-identity -v -p codesigning` then says
+"0 valid identities", the keychain is missing Apple's current intermediate. Install it with
+`curl -O https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer && security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db`.
+(This Mac only had the G1 intermediate, which expired in 2023.)
+
+After switching signing identity, run `tccutil reset Accessibility com.ricardo.wade`, then
+use menu bar → Grant Accessibility Access…, so the grant is recorded against the new,
+certificate-based requirement.
 
 ### Manual checks
 

@@ -49,7 +49,10 @@ struct SettingsView: View {
                         if permission.isTrusted {
                             Label("Granted", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                         } else {
-                            Button("Open System Settings") { permission.openSystemSettings() }
+                            HStack {
+                                Button("Grant Access…") { permission.request() }
+                                Button("Open System Settings") { permission.openSystemSettings() }
+                            }
                         }
                     }
                 }

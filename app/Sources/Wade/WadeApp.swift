@@ -89,6 +89,7 @@ struct MenuContent: View {
             Text("Setup not finished")
         } else if !model.permission.isTrusted {
             Text("Accessibility access needed")
+            Button("Grant Accessibility Access…") { model.permission.request() }
         } else {
             Text("Observing · \(model.eventCount) events sent")
             if let e = model.lastEvent {
