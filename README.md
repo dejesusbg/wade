@@ -11,7 +11,7 @@ app/       SwiftUI menu-bar app (SwiftPM).
 backend/   Python interpretability core (uv project). Currently: UDS server that logs events.
 ```
 
-## Status: Phase 1 (SwiftUI shell), done pending manual AX check
+## Status: Phase 1 (SwiftUI shell) complete, verified on-device 2026-09-23
 
 ### Run it
 
