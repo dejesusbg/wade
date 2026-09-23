@@ -35,11 +35,12 @@ struct OnboardingView: View {
                     Button("Back") { step = Step(rawValue: step.rawValue - 1)! }
                 }
                 if step == .facts {
+                    // No Return shortcut here: Return in the fact field must add the fact.
                     Button("Finish") {
                         memory.completeOnboarding()
                         dismissWindow()
                     }
-                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
                 } else {
                     Button("Continue") { step = Step(rawValue: step.rawValue + 1)! }
                         .keyboardShortcut(.defaultAction)

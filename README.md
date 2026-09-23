@@ -40,8 +40,8 @@ access in System Settings stops observation within about a second.
 
 | `event_type` | Source | Metadata |
 |---|---|---|
-| `focus_change` | app activation, AX focused-window change, focused-window title change (300ms debounce, deduped) | `cause` |
-| `error_dialog` | AX window/sheet created with a sheet/dialog role **and** error-like text (EN+ES keywords) | `signature` (16-hex hash, digits masked), `role` |
+| `focus_change` | app activation / AX focused-window change (300ms settle); focused-window title change only once stable for 2s, so title spinners and progress counters don't read as context switches; deduped | `cause` |
+| `error_dialog` | a sheet/dialog with error-like text (EN+ES keywords), found on window creation, focus change, or app activation; each dialog is reported once, while a new dialog with the same text counts as a recurrence | `signature` (16-hex hash, digits masked), `role` |
 | `keypress_burst` | global keyDown monitor → typing runs (gap 2s, ≥5 keys), closed on focus change | `key_count`, `duration_s`, `started_at` |
 | `undo` | global keyDown monitor, ⌘Z | none |
 | `idle_start` / `idle_end` | `CGEventSource` seconds-since-any-input, 30s threshold | `idle_seconds` (end) |
@@ -57,10 +57,24 @@ Known gaps, kept on purpose for v1:
 
 ### Signing
 
-No Apple Development identity is on this Mac, so `scripts/bundle.sh` signs ad-hoc with a
-designated requirement pinned to `identifier "com.ricardo.wade"`. This is meant to keep
-the Accessibility grant valid across rebuilds. If macOS still asks again after a rebuild,
-sign in to Xcode with an Apple ID and set `WADE_SIGN_IDENTITY="Apple Development: …"`.
+`scripts/bundle.sh` signs with the first **Apple Development** certificate in your keychain
+(or `$WADE_SIGN_IDENTITY`). macOS then ties the Accessibility grant to "this bundle id,
+signed by this developer", which survives rebuilds and can't be claimed by other apps.
+
+Without a certificate it falls back to ad-hoc signing, with the requirement pinned to
+`identifier "com.ricardo.wade"` only. That also survives rebuilds (verified), but any locally
+built app claiming that id would inherit Wade's Accessibility access. It's fine for bootstrapping.
+
+Get a certificate once: Xcode → Settings → Accounts → your Apple ID → Manage Certificates…
+→ **+** → Apple Development. Then rebuild. macOS will ask for Accessibility once more,
+because the signature changed. Remove the old "Wade" entry in System Settings → Privacy &
+Security → Accessibility and grant the new one.
+
+### Manual checks
+
+`scripts/dialog-probe.sh` pops up two clearly labeled *fake* error alerts for about 11s. With
+Wade running, expect exactly two `error_dialog` events from `com.wade.dialog-probe` with
+equal signatures.
 
 ### Memory stores (§5.7)
 

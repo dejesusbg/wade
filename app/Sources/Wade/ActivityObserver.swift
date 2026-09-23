@@ -35,6 +35,10 @@ final class ActivityObserver {
     private var lastEmittedFocus: (bundleId: String, title: String)?
     private var focusDebounce: Task<Void, Never>?
 
+    /// Last reported dialog. The element identity stops re-reporting one dialog when you switch
+    /// back to it; a *new* dialog with the same signature is a real recurrence and is reported.
+    private var lastErrorDialog: AXUIElement?
+
     private var bursts = TypingBurstDetector()
     private var idle = IdleDetector()
 
@@ -78,6 +82,7 @@ final class ActivityObserver {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         tick?.invalidate()
         focusDebounce?.cancel()
+        pendingFocusCause = nil
         detachAX()
         workspaceToken = nil
         keyMonitor = nil
@@ -97,20 +102,36 @@ final class ActivityObserver {
         attachAX(pid: pid)
         windowTitle = readFocusedWindowTitle() ?? ""
         scheduleFocusEmit(cause: "app_activated")
+        // An app often comes forward *because* it's showing an alert, which was created before
+        // we attached, so no WindowCreated arrives for it. Check what's focused now.
+        inspectFocusedWindowForErrorDialog()
     }
 
-    /// Titles churn (terminals, browsers, editors), so coalesce and only emit real changes.
+    /// App/window switches emit after a short settle. Title-only changes must hold still for 2s:
+    /// spinners and progress counters in titles (terminals, build tools, CLIs) tick every
+    /// second and would otherwise read as constant context switching. A pending app/window
+    /// emit is never replaced by a title tick; it reads the latest title when it fires.
+    private var pendingFocusCause: String?
+
     private func scheduleFocusEmit(cause: String) {
+        let isTitleOnly = cause == "title_changed"
+        if isTitleOnly, let pending = pendingFocusCause, pending != cause { return }
         focusDebounce?.cancel()
+        pendingFocusCause = cause
         focusDebounce = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: isTitleOnly ? .seconds(2) : .milliseconds(300))
             guard !Task.isCancelled, let self else { return }
+            self.pendingFocusCause = nil
             self.emitFocusIfChanged(cause: cause)
         }
     }
 
     private func emitFocusIfChanged(cause: String) {
         guard bundleId != ownBundleId else { return }
+        // Right after activation the app may not report its focused window yet; by now it usually
+        // does. Same for an alert shown *as* the app activates: it can land before we attached.
+        if let title = readFocusedWindowTitle() { windowTitle = title }
+        inspectFocusedWindowForErrorDialog()
         if let last = lastEmittedFocus, last.bundleId == bundleId, last.title == windowTitle { return }
         lastEmittedFocus = (bundleId, windowTitle)
         send(.focusChange, metadata: ["cause": .string(cause)])
@@ -157,6 +178,7 @@ final class ActivityObserver {
         case kAXFocusedWindowChangedNotification:
             windowTitle = readFocusedWindowTitle() ?? ""
             scheduleFocusEmit(cause: "window_changed")
+            inspectFocusedWindowForErrorDialog()
         case kAXTitleChangedNotification:
             // Only the focused window's title matters; ignore tabs/buttons/background windows.
             guard let focused = axElement(axApp, kAXFocusedWindowAttribute), CFEqual(focused, element) else { return }
@@ -186,10 +208,18 @@ final class ActivityObserver {
         collectStaticText(element, into: &texts, depth: 0)
         guard ErrorSignature.looksLikeError(texts) else { return }
 
+        // The same dialog arrives via WindowCreated *and* via focus/activation; report it once.
+        if let last = lastErrorDialog, CFEqual(last, element) { return }
+        lastErrorDialog = element
+
         send(.errorDialog, metadata: [
             "signature": .string(ErrorSignature.make(from: texts)),
             "role": .string(subrole ?? role ?? ""),
         ])
+    }
+
+    private func inspectFocusedWindowForErrorDialog() {
+        if let window = axElement(axApp, kAXFocusedWindowAttribute) { inspectForErrorDialog(window) }
     }
 
     private func collectStaticText(_ element: AXUIElement, into texts: inout [String], depth: Int) {
