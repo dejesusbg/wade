@@ -25,7 +25,13 @@ def main() -> None:
 
     # Phase 0: events are only logged. Phase 2 replaces this with TKG ingestion.
     def on_tkg_event(event: dict) -> None:
-        log.info("tkg_event %s from %s", event["event_type"], event["app_bundle_id"])
+        log.info(
+            "tkg_event %-14s %s | %r %s",
+            event["event_type"],
+            event["app_bundle_id"],
+            event.get("window_title", ""),
+            event.get("metadata") or "",
+        )
 
     server = BackendServer(args.socket or protocol.default_socket_path(), on_tkg_event)
 

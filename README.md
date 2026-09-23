@@ -4,11 +4,14 @@ Context-aware macOS menu-bar assistant that decides *on its own* when help is wa
 using J-space engagement in a local model as the trigger. See `CLAUDE.md` for the full brief.
 
 ```
-app/       SwiftUI menu-bar app (SwiftPM). WadeIPC = wire protocol + UDS client.
-backend/   Python interpretability core (uv project). Currently: UDS server only.
+app/       SwiftUI menu-bar app (SwiftPM).
+             WadeIPC   wire protocol + reconnecting UDS client
+             WadeCore  memory stores (SQLite), integrations catalog, event detectors
+             Wade      menu bar, onboarding, settings, AX/NSWorkspace observation
+backend/   Python interpretability core (uv project). Currently: UDS server that logs events.
 ```
 
-## Status: Phase 0 (environment, inventory, UDS round-trip)
+## Status: Phase 1 (SwiftUI shell), done pending manual AX check
 
 ### Run it
 
@@ -16,17 +19,54 @@ backend/   Python interpretability core (uv project). Currently: UDS server only
 # Terminal 1: backend (owns the socket)
 cd backend && uv sync && uv run wade-backend
 
-# Terminal 2: headless round-trip check (exit 0 = pong received)
-cd app && swift build && .build/debug/wade-ipc-check
-
-# or the menu bar skeleton (glyph: dashed = backend down, circle = connected)
-cd app && swift run Wade
+# Terminal 2: build + launch the signed app bundle (needed for the Accessibility grant)
+cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd backend && uv run pytest`.
+Tests: `cd app && swift test` (14) and `cd backend && uv run pytest` (3).
+Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
+
+Menu bar glyph: dashed = not observing (backend down, setup unfinished, or no Accessibility
+access); circle = observing; filled = a trigger arrived.
 
 Socket: `~/Library/Application Support/Wade/wade.sock` (mode 0600), overridable on both
 sides with `WADE_SOCKET_PATH`. Either process can start first; the app reconnects every 2s.
+Memory: `~/Library/Application Support/Wade/memory.sqlite`.
+
+### What Phase 1 observes
+
+Nothing is observed until onboarding is finished **and** Accessibility is granted. Revoking
+access in System Settings stops observation within about a second.
+
+| `event_type` | Source | Metadata |
+|---|---|---|
+| `focus_change` | app activation, AX focused-window change, focused-window title change (300ms debounce, deduped) | `cause` |
+| `error_dialog` | AX window/sheet created with a sheet/dialog role **and** error-like text (EN+ES keywords) | `signature` (16-hex hash, digits masked), `role` |
+| `keypress_burst` | global keyDown monitor → typing runs (gap 2s, ≥5 keys), closed on focus change | `key_count`, `duration_s`, `started_at` |
+| `undo` | global keyDown monitor, ⌘Z | none |
+| `idle_start` / `idle_end` | `CGEventSource` seconds-since-any-input, 30s threshold | `idle_seconds` (end) |
+
+Privacy: key contents are never stored or sent (only counts and a ⌘Z flag), and dialog text
+is reduced to a hash. Wade's own windows are excluded.
+
+Known gaps, kept on purpose for v1:
+- In-window error UI that isn't a dialog (e.g. Xcode's "Build Failed" banner) is not detected.
+  Revisit if Phase 7 shows it matters.
+- No global hotkey (dropped for v1), so no Input Monitoring permission is needed.
+  Accessibility alone covers the key monitor.
+
+### Signing
+
+No Apple Development identity is on this Mac, so `scripts/bundle.sh` signs ad-hoc with a
+designated requirement pinned to `identifier "com.ricardo.wade"`. This is meant to keep
+the Accessibility grant valid across rebuilds. If macOS still asks again after a rebuild,
+sign in to Xcode with an Apple ID and set `WADE_SIGN_IDENTITY="Apple Development: …"`.
+
+### Memory stores (§5.7)
+
+One SQLite file, separate tables: `onboarding_facts` + `integration_opt_ins` (user-stated,
+editable in Settings → About You) and `correction_facts` (provenance-tagged, shown in
+Settings → Corrections, empty until Phase 6 writes to it). Explicit feedback only.
 
 ### Protocol
 
@@ -38,25 +78,20 @@ Deliberate choices:
 - Events sent while disconnected are **dropped, not queued**. A stale TKG backlog
   replayed on reconnect would feed the gate a false burst.
 - Malformed lines are logged and skipped. They never drop the connection.
-- `metadata` is `[String: String]` on the Swift side for now. Widen it if Phase 1 needs numbers.
+- `metadata` values are scalar JSON (string/int/double/bool).
 
-### Environment (verified 2026-09-22)
+### Environment (verified 2026-09-23)
 
 | Requirement (§6) | Found | OK |
 |---|---|---|
 | macOS 26+ | macOS 27.0 (26A428) | ✅ |
 | Apple Silicon, 16GB | Apple M5, 16GB | ✅ |
 | Apple Intelligence | opted in | ✅ |
-| Xcode 26+ | **Command Line Tools only** | ⚠️ see below |
+| Xcode 26+ | Xcode 27.0 (27A266a) | ✅ |
 | Swift 6 | Swift 6.4 | ✅ |
 | Python 3.11+ | system 3.9.6. Installed uv 0.12.17 → Python 3.12.14 (project-local) | ✅ |
 | mlx / mlx-lm | on PyPI: mlx 0.32.2, mlx-lm 0.31.3 (not installed yet, Phase 3) | ✅ |
-| FoundationModels.framework | present in CLT SDK | ✅ |
-
-**Xcode gap:** CLT builds a SwiftPM executable fine, but it lacks the SwiftUI macro
-plugin (`@State` fails; worked around in the skeleton). It also can't produce a signed `.app`
-bundle. Phase 1 needs one, because Accessibility (TCC) permission attaches to a stable
-bundle identity. Install Xcode before Phase 1.
+| FoundationModels.framework | present in SDK | ✅ |
 
 ### Legacy inventory (§3)
 

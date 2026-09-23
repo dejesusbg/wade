@@ -2,37 +2,44 @@ import AppKit
 import SwiftUI
 import WadeIPC
 
-// Phase 0 skeleton: menu bar residency only (CLAUDE.md §5.1). No windows, no cursor-follow.
+// Menu bar residency only (CLAUDE.md §5.1): no Dock icon, no cursor-follow. Windows exist
+// only for onboarding and settings. No global hotkey in v1 — triggering is automatic.
 
 @main
 struct WadeApp: App {
-    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
-    // Plain `let`, not `@State`: the App value lives for the whole process, and
-    // Command Line Tools ship without the SwiftUIMacros plugin that `@State` needs.
-    private let model = AppModel()
+    @State private var model = AppModel()
 
     var body: some Scene {
         MenuBarExtra("Wade", systemImage: model.glyph) {
             MenuContent(model: model)
         }
-    }
-}
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // Menu-bar-only: no Dock icon. (An LSUIElement Info.plist replaces this once we ship an .app bundle.)
-        NSApp.setActivationPolicy(.accessory)
+        Window("Welcome to Wade", id: "onboarding") {
+            OnboardingView(permission: model.permission, memory: model.memory)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(model.memory.onboardingCompleted ? .suppressed : .presented)
+
+        Settings {
+            SettingsView(permission: model.permission, memory: model.memory)
+        }
     }
 }
 
 @MainActor
 @Observable
 final class AppModel {
+    let permission = AccessibilityPermission()
+    let memory = MemoryModel()
     private(set) var backendState = BackendClient.State.disconnected
-    private(set) var lastPong: Date?
     private(set) var lastTrigger: TriggerFired?
+    private(set) var eventCount = 0
+    private(set) var lastEvent: TKGEvent?
 
     private let client = BackendClient()
+    @ObservationIgnored private lazy var observer = ActivityObserver { [weak self] event in
+        self?.forward(event)
+    }
 
     init() {
         client.start()
@@ -41,48 +48,59 @@ final class AppModel {
         }
         Task { [client] in
             for await message in client.messages {
-                switch message {
-                case .pong: self.lastPong = .now
-                case .triggerFired(let trigger): self.lastTrigger = trigger
-                }
+                if case .triggerFired(let trigger) = message { self.lastTrigger = trigger }
             }
         }
+        syncObserver()
+    }
+
+    /// Observe only with consent (onboarding done) and permission (AX trusted). Re-evaluated
+    /// whenever either changes, so revoking access in System Settings stops observation.
+    private func syncObserver() {
+        let shouldRun = withObservationTracking {
+            memory.onboardingCompleted && permission.isTrusted
+        } onChange: { [weak self] in
+            Task { @MainActor in self?.syncObserver() }
+        }
+        if shouldRun { observer.start() } else { observer.stop() }
+    }
+
+    var isObserving: Bool { memory.onboardingCompleted && permission.isTrusted }
+
+    private func forward(_ event: TKGEvent) {
+        eventCount += 1
+        lastEvent = event
+        client.send(event)
     }
 
     var glyph: String {
-        switch backendState {
-        case .disconnected: "circle.dashed"
-        case .connected: lastTrigger == nil ? "circle" : "circle.fill"
-        }
-    }
-
-    func ping() { client.send(Ping()) }
-
-    func sendTestEvent() {
-        client.send(TKGEvent(
-            eventType: .focusChange,
-            appBundleId: Bundle.main.bundleIdentifier ?? "wade.dev",
-            windowTitle: "Phase 0 test event"
-        ))
+        if backendState == .disconnected || !isObserving { return "circle.dashed" }
+        return lastTrigger == nil ? "circle" : "circle.fill"
     }
 }
 
 struct MenuContent: View {
     let model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Text(model.backendState == .connected ? "Backend: connected" : "Backend: not running")
-        if let lastPong = model.lastPong {
-            Text("Last pong: \(lastPong.formatted(date: .omitted, time: .standard))")
-        }
-        if let trigger = model.lastTrigger {
-            Text("Last trigger: \(trigger.jspaceConcepts.joined(separator: ", "))")
+        if !model.memory.onboardingCompleted {
+            Text("Setup not finished")
+        } else if !model.permission.isTrusted {
+            Text("Accessibility access needed")
+        } else {
+            Text("Observing · \(model.eventCount) events sent")
+            if let e = model.lastEvent {
+                Text("Last: \(e.eventType.rawValue) · \(e.appBundleId)")
+            }
         }
         Divider()
-        Button("Ping backend") { model.ping() }
-            .disabled(model.backendState != .connected)
-        Button("Send test tkg_event") { model.sendTestEvent() }
-            .disabled(model.backendState != .connected)
+        Button(model.memory.onboardingCompleted ? "Setup…" : "Finish Setup…") {
+            openWindow(id: "onboarding")
+        }
+        SettingsLink { Text("Settings…") }
+            .keyboardShortcut(",")
         Divider()
         Button("Quit Wade") { NSApp.terminate(nil) }
             .keyboardShortcut("q")

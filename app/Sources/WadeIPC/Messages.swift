@@ -12,21 +12,55 @@ public enum TKGEventType: String, Codable, Sendable {
     case idleEnd = "idle_end"
 }
 
+/// Scalar JSON value for event-type-specific `metadata` (counts, durations, hashes, flags).
+public enum MetadataValue: Codable, Sendable, Equatable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let v = try? c.decode(Bool.self) { self = .bool(v) }
+        else if let v = try? c.decode(Int.self) { self = .int(v) }
+        else if let v = try? c.decode(Double.self) { self = .double(v) }
+        else { self = .string(try c.decode(String.self)) }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .int(let v): try c.encode(v)
+        case .double(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        }
+    }
+}
+
+extension MetadataValue: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral,
+    ExpressibleByFloatLiteral, ExpressibleByBooleanLiteral {
+    public init(stringLiteral v: String) { self = .string(v) }
+    public init(integerLiteral v: Int) { self = .int(v) }
+    public init(floatLiteral v: Double) { self = .double(v) }
+    public init(booleanLiteral v: Bool) { self = .bool(v) }
+}
+
 /// Swift → Python, frequent and small.
-public struct TKGEvent: Codable, Sendable {
+public struct TKGEvent: Codable, Sendable, Equatable {
     public var type = "tkg_event"
     public var eventType: TKGEventType
     public var timestamp: Double
     public var appBundleId: String
     public var windowTitle: String
-    public var metadata: [String: String]
+    public var metadata: [String: MetadataValue]
 
     public init(
         eventType: TKGEventType,
         timestamp: Double = Date().timeIntervalSince1970,
         appBundleId: String,
         windowTitle: String,
-        metadata: [String: String] = [:]
+        metadata: [String: MetadataValue] = [:]
     ) {
         self.eventType = eventType
         self.timestamp = timestamp

@@ -7,8 +7,12 @@ let package = Package(
     targets: [
         // Wire protocol + UDS client shared by the app and the headless check tool.
         .target(name: "WadeIPC"),
-        .executableTarget(name: "Wade", dependencies: ["WadeIPC"]),
-        // Headless UDS round-trip check (no GUI, no permissions), for Phase 0 / CI.
+        // UI-free logic: memory stores, integrations catalog, event detectors. Unit-tested.
+        .target(name: "WadeCore", linkerSettings: [.linkedLibrary("sqlite3")]),
+        .executableTarget(name: "Wade", dependencies: ["WadeIPC", "WadeCore"]),
+        // Headless UDS round-trip check (no GUI, no permissions).
         .executableTarget(name: "wade-ipc-check", dependencies: ["WadeIPC"]),
+        .testTarget(name: "WadeCoreTests", dependencies: ["WadeCore"]),
+        .testTarget(name: "WadeIPCTests", dependencies: ["WadeIPC"]),
     ]
 )
