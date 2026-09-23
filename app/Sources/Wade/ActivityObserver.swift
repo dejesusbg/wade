@@ -31,6 +31,7 @@ final class ActivityObserver {
     private var axApp: AXUIElement?
 
     private var bundleId = ""
+    private var appName = ""
     private var windowTitle = ""
     private var lastEmittedFocus: (bundleId: String, title: String)?
     private var focusDebounce: Task<Void, Never>?
@@ -99,6 +100,7 @@ final class ActivityObserver {
         guard let pid, let bundleId else { return }
         closeBurst()  // a typing run belongs to one app
         self.bundleId = bundleId
+        appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? ""
         attachAX(pid: pid)
         windowTitle = readFocusedWindowTitle() ?? ""
         scheduleFocusEmit(cause: "app_activated")
@@ -134,7 +136,8 @@ final class ActivityObserver {
         inspectFocusedWindowForErrorDialog()
         if let last = lastEmittedFocus, last.bundleId == bundleId, last.title == windowTitle { return }
         lastEmittedFocus = (bundleId, windowTitle)
-        send(.focusChange, metadata: ["cause": .string(cause)])
+        // app_name lets the digest say "Chrome" instead of guessing from the bundle id.
+        send(.focusChange, metadata: ["cause": .string(cause), "app_name": .string(appName)])
     }
 
     // MARK: Accessibility observer (per frontmost app)

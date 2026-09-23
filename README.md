@@ -8,10 +8,14 @@ app/       SwiftUI menu-bar app (SwiftPM).
              WadeIPC   wire protocol + reconnecting UDS client
              WadeCore  memory stores (SQLite), integrations catalog, event detectors
              Wade      menu bar, onboarding, settings, AX/NSWorkspace observation
-backend/   Python interpretability core (uv project). Currently: UDS server that logs events.
+backend/   Python interpretability core (uv project).
+             tkg/       Stage 1: temporal graph, features, rule-based gate, digest
+             synthetic  scenario builder + should/shouldn't-fire scenario library
 ```
 
-## Status: Phase 1 (SwiftUI shell) complete, verified on-device 2026-09-23
+## Status: Phase 2 (TKG + Stage 1 gate) done, check-in pending before Phase 3
+
+Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
 ### Run it
 
@@ -23,7 +27,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (14) and `cd backend && uv run pytest` (3).
+Tests: `cd app && swift test` (14) and `cd backend && uv run pytest` (29).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar glyph: dashed = not observing (backend down, setup unfinished, or no Accessibility
@@ -32,6 +36,54 @@ access); circle = observing; filled = a trigger arrived.
 Socket: `~/Library/Application Support/Wade/wade.sock` (mode 0600), overridable on both
 sides with `WADE_SOCKET_PATH`. Either process can start first; the app reconnects every 2s.
 Memory: `~/Library/Application Support/Wade/memory.sqlite`.
+
+### Stage 1: TKG and gate (Phase 2)
+
+Every `tkg_event` goes into an in-process graph (`backend/src/wade_backend/tkg/`). The graph
+keeps a 10-minute sliding window and decays older nodes with a 180s half-life. Nothing is
+persisted.
+- **Nodes:** `FocusEvent`, `ActionEvent`, `ErrorEvent`.
+- **Edges:** `NEXT`, `SWITCHES_TO` (app-level, decayed frequency), `REPEATS` (same error
+  signature). Edges are derived from the nodes on demand, so pruning can't leave dangling ones.
+
+After each event the **rule-based gate** scores the current state. Each rule saturates:
+
+| Rule | Max | Saturation |
+|---|---|---|
+| `recurring_error` (same signature, decayed count) | 0.60 | 2 fresh → 0.4, 2.5+ → full |
+| `app_pingpong` (same two apps, decayed switches) | 0.35 | 2 → 0, 6 → full |
+| `undo_cluster` (decayed undos) | 0.25 | 1 → 0, 5 → full |
+| `idle_then_burst` (≥45s pause, then errors/switches/undos within 2 min) | 0.15 | flag |
+| `app_thrash` (≥5 distinct apps in 2 min) | 0.10 | flag |
+
+It fires at **≥ 0.5**, with a 120s cooldown so one episode fires once. By construction, no
+single non-error pattern can fire it. It takes three recent identical errors, or a repeated
+error plus one more pattern, or several weaker patterns together. On a fire, the backend
+logs the score, the reasons and the **digest**, e.g.:
+
+> In Xcode ('Wade — ActivityObserver.swift') for 11s; switched Xcode↔Safari 4x in the last
+> 3min; the same error dialog in Xcode appeared 3x, last just now; 3 typing bursts in the last 2min.
+
+In Phase 2 a gate fire is only logged. Phase 3 passes it to the Stage 2 J-lens check, and only
+a Stage 2 fire becomes `trigger_fired`.
+
+**Scenarios** (`wade_backend.synthetic`): all 4 should-fire scenarios score ≥ 0.56, and all 8
+should-not-fire scenarios score ≤ 0.21. The should-not-fire set includes stuck-looking
+routines: copy-paste ping-pong, typo undos, a one-off error, errors 8 min apart, many tabs,
+and opening many apps. The set is **constructed**, so passing it shows the rules do what
+they're designed to do, not that they predict need. That's Phase 7.
+
+**Real data:** one 20-minute on-device session (not committed) peaked at 0.28 during routine
+work (Chrome↔Terminal ping-pong only). It fired once, on the dialog-probe run (the same
+error twice, plus switching).
+
+Record and replay real sessions (the recording includes window titles, so it's opt-in, and
+`*.jsonl` is gitignored):
+
+```sh
+cd backend && uv run wade-backend --record ~/wade-session.jsonl   # -v logs every event + score
+uv run wade-replay ~/wade-session.jsonl [--all]
+```
 
 ### What Phase 1 observes
 

@@ -7,6 +7,7 @@ dependencies = []
 
 [project.scripts]
 wade-backend = "wade_backend.__main__:main"
+wade-replay = "wade_backend.replay:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

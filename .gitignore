@@ -20,6 +20,9 @@ venv/
 .venv/
 env/
 
+# Recorded sessions (contain window titles)
+*.jsonl
+
 # Standard
 docs
 legacy
