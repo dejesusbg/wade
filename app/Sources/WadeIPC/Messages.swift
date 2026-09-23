@@ -10,6 +10,8 @@ public enum TKGEventType: String, Codable, Sendable {
     case errorDialog = "error_dialog"
     case idleStart = "idle_start"
     case idleEnd = "idle_end"
+    case contentSnapshot = "content_snapshot"
+    case selection
 }
 
 /// Scalar JSON value for event-type-specific `metadata` (counts, durations, hashes, flags).

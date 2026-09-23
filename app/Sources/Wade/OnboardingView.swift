@@ -55,21 +55,22 @@ struct OnboardingView: View {
 
     private var accessStep: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Wade helps when you look stuck").font(.title2.bold())
+            Text("Wade speaks up when it can help").font(.title2.bold())
             Text("""
-                Wade sits in your menu bar and stays quiet. It only speaks up when what you're doing \
-                suggests you could use a hand, like bouncing between the same windows or hitting the \
-                same error again.
+                Wade sits in your menu bar and stays quiet. It only speaks up when there's something \
+                worth saying: you keep hitting the same error, or what's in front of you could use a \
+                quick action, like citing a paragraph or cloning a repo.
                 """)
             Text("To notice that, Wade needs Accessibility access. With it, Wade sees:")
             VStack(alignment: .leading, spacing: 6) {
-                Label("Which app and window are in front, and when that changes", systemImage: "macwindow")
-                Label("When error dialogs appear (reduced to a fingerprint, not stored as text)", systemImage: "exclamationmark.triangle")
-                Label("How much you're typing, never what you type", systemImage: "keyboard")
+                Label("Which app and window are in front, and page addresses", systemImage: "macwindow")
+                Label("Text you select, and a short excerpt of the page or document in front of you", systemImage: "text.viewfinder")
+                Label("Error messages when they appear", systemImage: "exclamationmark.triangle")
+                Label("How much you're typing, never your keystrokes or what you type into fields", systemImage: "keyboard")
                 Label("When you step away and come back", systemImage: "moon.zzz")
             }
             .padding(.leading, 4)
-            Text("Everything stays on this Mac. You can revoke access anytime in System Settings.")
+            Text("Password fields and text boxes are never read. Everything stays on this Mac. You can revoke access anytime in System Settings.")
                 .font(.callout).foregroundStyle(.secondary)
 
             if permission.isTrusted {

@@ -7,6 +7,8 @@ at the multi-token / situational-concept problem (§2). Plain facts only, no int
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from .features import Features
 from .graph import TemporalGraph
 
@@ -24,13 +26,27 @@ def _title(title: str, limit: int = 60) -> str:
     return title if len(title) <= limit else title[: limit - 1] + "…"
 
 
+def _place(url: str) -> str:
+    """Domain for web pages, file name for documents. Never the full URL (paths can be personal)."""
+    parsed = urlparse(url)
+    if parsed.scheme in ("http", "https"):
+        return parsed.netloc.removeprefix("www.")
+    if parsed.scheme == "file":
+        return parsed.path.rsplit("/", 1)[-1]
+    return ""
+
+
 def render(g: TemporalGraph, f: Features) -> str:
     parts: list[str] = []
 
     if f.current_app:
         where = g.app_name(f.current_app)
+        focus = g.current_focus()
+        place = _place(focus.url) if focus else ""
         if f.current_title:
-            where += f" ('{_title(f.current_title)}')"
+            where += f" ('{_title(f.current_title)}'" + (f", {place})" if place else ")")
+        elif place:
+            where += f" ({place})"
         parts.append(f"In {where} for {_dur(f.current_focus_s)}")
 
     if f.top_pair and f.top_pair_switches_3min >= 3:

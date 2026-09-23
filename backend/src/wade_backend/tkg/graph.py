@@ -31,6 +31,10 @@ class FocusEvent:
     window_title: str
     ts_start: float
     ts_end: float | None = None  # None while it's the current focus
+    # Filled in by a content_snapshot once the user has dwelt on this context for a moment.
+    url: str = ""
+    excerpt: str = ""
+    snapshotted: bool = False
 
     @property
     def ts(self) -> float:
@@ -39,7 +43,7 @@ class FocusEvent:
 
 @dataclass
 class ActionEvent:
-    type: str  # keypress_burst | undo | idle_start | idle_end
+    type: str  # keypress_burst | undo | idle_start | idle_end | selection (metadata["text"])
     ts: float
     app_context: str  # bundle id of the app in front when it happened
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -52,6 +56,7 @@ class ErrorEvent:
     ts: float
     recurrence_count: int  # 1 for the first occurrence of this signature within the window
     window_title: str = ""
+    text: str = ""  # first ~200 chars of the dialog
 
 
 Node = FocusEvent | ActionEvent | ErrorEvent
@@ -83,7 +88,11 @@ class TemporalGraph:
             case "error_dialog":
                 sig = str(meta.get("signature", ""))
                 prior = sum(1 for n in self.errors() if n.signature == sig)
-                node = ErrorEvent(app, sig, ts, prior + 1, event.get("window_title", ""))
+                node = ErrorEvent(app, sig, ts, prior + 1, event.get("window_title", ""), str(meta.get("text", "")))
+            case "content_snapshot":
+                # Not a node of its own: it describes the current FocusEvent.
+                self._attach_snapshot(app, event.get("window_title", ""), meta)
+                node = None
             case other:
                 node = ActionEvent(other, ts, app, dict(meta))
 
@@ -99,6 +108,19 @@ class TemporalGraph:
         if current and current.ts_end is None:
             current.ts_end = ts
         return FocusEvent(app, self.app_name(app), title, ts)
+
+    def _attach_snapshot(self, app: str, title: str, meta: dict[str, Any]) -> None:
+        current = self.current_focus()
+        # A snapshot for a context the user already left is stale; drop it.
+        if current and current.app_bundle_id == app and current.window_title == title:
+            current.url = str(meta.get("url", ""))
+            current.excerpt = str(meta.get("excerpt", ""))
+            current.snapshotted = True
+
+    def advance(self, now: float) -> None:
+        """Move the clock forward without an event (for time-based moments like dwell)."""
+        self.now = max(self.now, now)
+        self.prune()
 
     def _insert(self, node: Node) -> None:
         # Events can arrive slightly out of order (e.g. a typing burst is stamped at its end but

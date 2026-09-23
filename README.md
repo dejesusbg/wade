@@ -1,7 +1,8 @@
 # Wade v2
 
-Context-aware macOS menu-bar assistant that decides *on its own* when help is warranted,
-using J-space engagement in a local model as the trigger. See `CLAUDE.md` for the full brief.
+Context-aware macOS menu-bar assistant that decides *on its own* when there's something worth
+saying (you're stuck, or what's in front of you invites an action), using J-space engagement
+in a local model as the trigger. See `CLAUDE.md` for the full brief.
 
 ```
 app/       SwiftUI menu-bar app (SwiftPM).
@@ -9,11 +10,11 @@ app/       SwiftUI menu-bar app (SwiftPM).
              WadeCore  memory stores (SQLite), integrations catalog, event detectors
              Wade      menu bar, onboarding, settings, AX/NSWorkspace observation
 backend/   Python interpretability core (uv project).
-             tkg/       Stage 1: temporal graph, features, rule-based gate, digest
-             synthetic  scenario builder + should/shouldn't-fire scenario library
+             tkg/       Stage 1: temporal graph, features, stuck scorer, moments, digest
+             synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 2 (TKG + Stage 1 gate) done, check-in pending before Phase 3
+## Status: Phase 2 (TKG + Stage 1 moments) done, check-in pending before Phase 3
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -27,7 +28,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (14) and `cd backend && uv run pytest` (29).
+Tests: `cd app && swift test` (16) and `cd backend && uv run pytest` (46).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar glyph: dashed = not observing (backend down, setup unfinished, or no Accessibility
@@ -37,16 +38,35 @@ Socket: `~/Library/Application Support/Wade/wade.sock` (mode 0600), overridable 
 sides with `WADE_SOCKET_PATH`. Either process can start first; the app reconnects every 2s.
 Memory: `~/Library/Application Support/Wade/memory.sqlite`.
 
-### Stage 1: TKG and gate (Phase 2)
+### Stage 1: TKG and moments (Phase 2)
+
+Wade speaks at **moments worth speaking**: when you're stuck, and at opportunities (a repo
+page you could clone, a paragraph you could cite, a paper to save, a flight search, a
+comparison). Stage 1 can't judge which moments are worth it, and it **never interrupts**. It
+picks which moments get a Stage 2 look, within a compute budget. Only Stage 2 (Phase 3) can
+surface anything. A test enforces that nothing in Stage 1 can send `trigger_fired`.
 
 Every `tkg_event` goes into an in-process graph (`backend/src/wade_backend/tkg/`). The graph
 keeps a 10-minute sliding window and decays older nodes with a 180s half-life. Nothing is
 persisted.
-- **Nodes:** `FocusEvent`, `ActionEvent`, `ErrorEvent`.
+- **Nodes:** `FocusEvent` (plus URL/excerpt once snapshotted), `ActionEvent`, `ErrorEvent`
+  (plus text).
 - **Edges:** `NEXT`, `SWITCHES_TO` (app-level, decayed frequency), `REPEATS` (same error
-  signature). Edges are derived from the nodes on demand, so pruning can't leave dangling ones.
+  signature), derived from the nodes on demand.
 
-After each event the **rule-based gate** scores the current state. Each rule saturates:
+**Moment kinds** (`tkg/moments.py`):
+
+| Kind | When | Shown to user? |
+|---|---|---|
+| `stuck` | the stuck scorer (below) crosses 0.5; 120s cooldown | if Stage 2 agrees |
+| `selection` | you selected ≥15 chars and held the selection 2s | if Stage 2 agrees |
+| `settled` | a content snapshot arrived and you stayed ≥15s; each context (app + URL/title) once per 10 min | if Stage 2 agrees |
+| `audit` | nothing else checked for 5 min, and you're active | **never**, logged only, to measure what the other kinds miss |
+
+**Budget:** at most one check per 20s and 60 per rolling hour. `stuck` bypasses both: it's
+rare and the most valuable.
+
+**Stuck scorer** (`tkg/gate.py`). Each rule saturates:
 
 | Rule | Max | Saturation |
 |---|---|---|
@@ -56,52 +76,72 @@ After each event the **rule-based gate** scores the current state. Each rule sat
 | `idle_then_burst` (≥45s pause, then errors/switches/undos within 2 min) | 0.15 | flag |
 | `app_thrash` (≥5 distinct apps in 2 min) | 0.10 | flag |
 
-It fires at **≥ 0.5**, with a 120s cooldown so one episode fires once. By construction, no
-single non-error pattern can fire it. It takes three recent identical errors, or a repeated
-error plus one more pattern, or several weaker patterns together. On a fire, the backend
-logs the score, the reasons and the **digest**, e.g.:
+No single non-error pattern can reach 0.5. The threshold stays there until Phase 3 measures
+what a Stage 2 check costs, then it can move toward firing more often.
+
+Each check carries Stage 2's two inputs (§5.4):
+- **(a) context:** app, title, URL, excerpt, selection, recent error text
+- **(b) digest:** plain facts only, with the domain but never the page text
+
+The digest looks like this:
 
 > In Xcode ('Wade — ActivityObserver.swift') for 11s; switched Xcode↔Safari 4x in the last
 > 3min; the same error dialog in Xcode appeared 3x, last just now; 3 typing bursts in the last 2min.
 
-In Phase 2 a gate fire is only logged. Phase 3 passes it to the Stage 2 J-lens check, and only
-a Stage 2 fire becomes `trigger_fired`.
+The backend logs `CHECK REQUESTED kind=… | digest`. Screen text is logged only at `-v`.
 
-**Scenarios** (`wade_backend.synthetic`): all 4 should-fire scenarios score ≥ 0.56, and all 8
-should-not-fire scenarios score ≤ 0.21. The should-not-fire set includes stuck-looking
-routines: copy-paste ping-pong, typo undos, a one-off error, errors 8 min apart, many tabs,
-and opening many apps. The set is **constructed**, so passing it shows the rules do what
-they're designed to do, not that they predict need. That's Phase 7.
+**Scenarios** (`wade_backend.synthetic.SCENARIOS`): each states which kinds it must and must
+not produce.
+- **Stuck:** 4 scenarios, ≥ 0.56.
+- **Routine:** 8 scenarios, stuck ≤ 0.21 and only occasional audits.
+- **Demo-derived opportunities:** repo page, cite a selection, read a paper, flight search,
+  compare products.
+- **Non-moments:** quick glances, a one-word selection.
 
-**Real data:** one 20-minute on-device session (not committed) peaked at 0.28 during routine
-work (Chrome↔Terminal ping-pong only). It fired once, on the dialog-probe run (the same
-error twice, plus switching).
+The set is **constructed**, so passing it shows the rules behave as designed, not that they
+predict need. That's Phase 7.
 
-Record and replay real sessions (the recording includes window titles, so it's opt-in, and
-`*.jsonl` is gitignored):
+Record and replay real sessions (the recording includes window titles and screen text, so
+it's opt-in, and `*.jsonl` is gitignored). The replay prints checks per hour by kind:
 
 ```sh
 cd backend && uv run wade-backend --record ~/wade-session.jsonl   # -v logs every event + score
 uv run wade-replay ~/wade-session.jsonl [--all]
 ```
 
-### What Phase 1 observes
+### What the app observes
 
 Nothing is observed until onboarding is finished **and** Accessibility is granted. Revoking
 access in System Settings stops observation within about a second.
 
 | `event_type` | Source | Metadata |
 |---|---|---|
-| `focus_change` | app activation / AX focused-window change (300ms settle); focused-window title change only once stable for 2s, so title spinners and progress counters don't read as context switches; deduped | `cause` |
-| `error_dialog` | a sheet/dialog with error-like text (EN+ES keywords), found on window creation, focus change, or app activation; each dialog is reported once, while a new dialog with the same text counts as a recurrence | `signature` (16-hex hash, digits masked), `role` |
+| `focus_change` | app activation / AX focused-window change (300ms settle); focused-window title change only once stable for 2s, so title spinners and progress counters don't read as context switches; deduped | `cause`, `app_name` |
+| `content_snapshot` | 4s after a focus change, if still there: the top-level page/document URL, plus a ≤500-char excerpt. Native editors: the visible text range. Web pages: page text from the `main` landmark or the web area under the window center | `url`, `excerpt`, `app_name` |
+| `selection` | AX selected-text change, 1s debounce, ≥15 chars | `text` (≤500), `length` |
+| `error_dialog` | a sheet/dialog with error-like text (EN+ES keywords), found on window creation, focus change, or app activation; each dialog is reported once, while a new dialog with the same text counts as a recurrence | `signature` (16-hex hash, digits masked), `role`, `text` (≤200) |
 | `keypress_burst` | global keyDown monitor → typing runs (gap 2s, ≥5 keys), closed on focus change | `key_count`, `duration_s`, `started_at` |
 | `undo` | global keyDown monitor, ⌘Z | none |
 | `idle_start` / `idle_end` | `CGEventSource` seconds-since-any-input, 30s threshold | `idle_seconds` (end) |
 
-Privacy: key contents are never stored or sent (only counts and a ⌘Z flag), and dialog text
-is reduced to a hash. Wade's own windows are excluded.
+Privacy:
+- **Keystrokes** are never captured, only counts and a ⌘Z flag.
+- **Screen text** goes only to the local backend and is capped: excerpt 500, selection 500,
+  dialog 200 characters.
+- **Never read:** secure (password) fields, and any text field, text area, combo box or search
+  field. That excludes what you type into forms, search boxes and chat inputs, including
+  editable areas inside web pages.
+- **Glances** shorter than 4s never read content.
+- **Wade's own windows** are excluded.
+
+Chromium browsers (Chrome, Brave, Edge, Arc, Vivaldi) only expose page content after an
+assistive app sets `AXManualAccessibility`. Wade sets it for running Chromium browsers when
+observation starts. The tree builds lazily, so a snapshot retries once after 3s.
 
 Known gaps, kept on purpose for v1:
+- Web-based editors (e.g. Google Docs) produce no excerpt, because their content is an editable
+  area. Selection still works there.
+- Canvas apps (e.g. Figma) expose noisy text; Stage 2 has to cope.
 - In-window error UI that isn't a dialog (e.g. Xcode's "Build Failed" banner) is not detected.
   Revisit if Phase 7 shows it matters.
 - No global hotkey (dropped for v1), so no Input Monitoring permission is needed.

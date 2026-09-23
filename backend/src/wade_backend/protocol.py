@@ -16,9 +16,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-TKG_EVENT_TYPES = frozenset(
-    {"focus_change", "keypress_burst", "undo", "error_dialog", "idle_start", "idle_end"}
-)
+TKG_EVENT_TYPES = frozenset({
+    "focus_change", "keypress_burst", "undo", "error_dialog", "idle_start", "idle_end",
+    # What the user is looking at: URL + excerpt after a short dwell, and selected text.
+    "content_snapshot", "selection",
+})
 
 SOCKET_ENV_VAR = "WADE_SOCKET_PATH"
 

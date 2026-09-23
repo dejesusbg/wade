@@ -53,3 +53,12 @@ import Testing
         #expect(a.count == 16)
     }
 }
+
+@Suite struct ContentTextTests {
+    @Test func normalizesWhitespaceAndCaps() {
+        #expect(ContentText.clip("  a \n\n b\tc  ", max: 50) == "a b c")
+        #expect(ContentText.clip("abcdefghij", max: 5) == "abcd…")
+        #expect(ContentText.clip("abcdefghij", max: 10) == "abcdefghij")
+        #expect(ContentText.clip(joining: ["Error 42:", "disk\nfull"], max: 200) == "Error 42: disk full")
+    }
+}

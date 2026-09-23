@@ -29,6 +29,14 @@ import Testing
         #expect(t.jspaceConcepts == ["stuck", "error"])
     }
 
+    @Test func newEventTypesUseBackendNames() throws {
+        let snap = TKGEvent(eventType: .contentSnapshot, appBundleId: "a", windowTitle: "t",
+                            metadata: ["url": "https://github.com/dejesusbg/monet", "excerpt": "monet"])
+        let json = try JSONSerialization.jsonObject(with: Wire.encoder.encode(snap)) as! [String: Any]
+        #expect(json["event_type"] as? String == "content_snapshot")
+        #expect(TKGEventType.selection.rawValue == "selection")
+    }
+
     @Test func ignoresUnknownTypes() throws {
         #expect(try Wire.decodeInbound(Data(#"{"type":"future_thing"}"#.utf8)) == nil)
     }

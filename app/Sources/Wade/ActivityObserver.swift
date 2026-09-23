@@ -5,17 +5,20 @@ import WadeIPC
 import os
 
 /// Turns raw macOS signals into `tkg_event`s (CLAUDE.md §5.2). Raw only: interpretation
-/// (switch frequency, recurrence, idle-then-burst) is the TKG's job in Python.
+/// (switch frequency, recurrence, which moments are worth a check) is Stage 1's job in Python.
 ///
-/// | event          | source                                                        |
-/// |----------------|---------------------------------------------------------------|
-/// | focus_change   | NSWorkspace app activation + AX focused-window / title change |
-/// | error_dialog   | AX window/sheet created, dialog-like role, error-like text    |
-/// | keypress_burst | global keyDown monitor → TypingBurstDetector (counts only)    |
-/// | undo           | global keyDown monitor, ⌘Z                                     |
-/// | idle_start/end | CGEventSource seconds-since-last-input, polled               |
+/// | event            | source                                                          |
+/// |------------------|-----------------------------------------------------------------|
+/// | focus_change     | NSWorkspace app activation + AX focused-window / title change   |
+/// | content_snapshot | 4s after a focus change: URL + ≤500-char excerpt of the content |
+/// | selection        | AX selected-text change, debounced, ≥15 chars                   |
+/// | error_dialog     | AX window/sheet, dialog-like role, error-like text              |
+/// | keypress_burst   | global keyDown monitor → TypingBurstDetector (counts only)      |
+/// | undo             | global keyDown monitor, ⌘Z                                       |
+/// | idle_start/end   | CGEventSource seconds-since-last-input, polled                 |
 ///
-/// Privacy: key contents are never stored or sent; dialog text is reduced to a hash.
+/// Privacy: key contents are never captured. Screen text (excerpts, selections, dialog text) is
+/// capped, sent only to the local backend, and never read from secure (password) fields.
 @MainActor
 final class ActivityObserver {
     private let emit: (TKGEvent) -> Void
@@ -35,6 +38,9 @@ final class ActivityObserver {
     private var windowTitle = ""
     private var lastEmittedFocus: (bundleId: String, title: String)?
     private var focusDebounce: Task<Void, Never>?
+    private var snapshotTask: Task<Void, Never>?
+    private var selectionTask: Task<Void, Never>?
+    private var lastSelection = ""
 
     /// Last reported dialog. The element identity stops re-reporting one dialog when you switch
     /// back to it; a *new* dialog with the same signature is a real recurrence and is reported.
@@ -72,6 +78,13 @@ final class ActivityObserver {
             MainActor.assumeIsolated { self?.onTick() }
         }
 
+        // Chromium builds its page accessibility tree lazily, seconds after it's first asked to.
+        // Ask every running browser now so the tree exists by the time a snapshot needs it.
+        for app in NSWorkspace.shared.runningApplications
+        where Self.chromiumBrowsers.contains(app.bundleIdentifier ?? "") {
+            enableManualAccessibility(AXUIElementCreateApplication(app.processIdentifier))
+        }
+
         let front = NSWorkspace.shared.frontmostApplication
         appActivated(pid: front?.processIdentifier, bundleId: front?.bundleIdentifier)
     }
@@ -83,12 +96,15 @@ final class ActivityObserver {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         tick?.invalidate()
         focusDebounce?.cancel()
+        snapshotTask?.cancel()
+        selectionTask?.cancel()
         pendingFocusCause = nil
         detachAX()
         workspaceToken = nil
         keyMonitor = nil
         tick = nil
         lastEmittedFocus = nil
+        lastSelection = ""
         bursts = TypingBurstDetector()
         idle = IdleDetector()
         log.info("observer stopped")
@@ -138,6 +154,95 @@ final class ActivityObserver {
         lastEmittedFocus = (bundleId, windowTitle)
         // app_name lets the digest say "Chrome" instead of guessing from the bundle id.
         send(.focusChange, metadata: ["cause": .string(cause), "app_name": .string(appName)])
+        scheduleSnapshot()
+    }
+
+    // MARK: Content snapshot
+
+    /// Once the user has stayed on a context for a few seconds, capture what it *is*: its URL and
+    /// a short excerpt. Glances shorter than that never read any content.
+    private func scheduleSnapshot() {
+        snapshotTask?.cancel()
+        let context = (bundleId, windowTitle)
+        snapshotTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled, let self, self.running,
+                  self.bundleId == context.0, self.windowTitle == context.1 else { return }
+            if self.takeSnapshot(allowRetry: true) { return }
+            // A Chromium page tree can still be building; one more try, then send what we have.
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, self.running,
+                  self.bundleId == context.0, self.windowTitle == context.1 else { return }
+            self.takeSnapshot(allowRetry: false)
+        }
+    }
+
+    /// Returns false (sending nothing) when a Chromium page's tree isn't ready and a retry is allowed.
+    @discardableResult
+    private func takeSnapshot(allowRetry: Bool) -> Bool {
+        guard let window = axElement(axApp, kAXFocusedWindowAttribute) else { return true }
+        let webArea = findWebArea(in: window)
+        if webArea == nil, allowRetry, Self.chromiumBrowsers.contains(bundleId) { return false }
+        // On web pages, start from the ARIA `main` landmark when there is one: skips site navigation.
+        let main = webArea.flatMap { area in
+            findElement(in: area) { axString($0, kAXSubroleAttribute) == "AXLandmarkMain" }
+        }
+
+        var metadata: [String: MetadataValue] = ["app_name": .string(appName)]
+        // The window's document is the top-level page. The web area found from the window's center
+        // can be an embedded frame, whose URL is less meaningful and can carry tokens in its query.
+        if let url = axURL(window, kAXDocumentAttribute) ?? (webArea.flatMap { axURL($0, kAXURLAttribute) }) {
+            metadata["url"] = .string(url)
+        }
+        let visible = visibleTextOfFocusedElement()
+        let excerpt = visible
+            ?? ContentText.clip(joining: collectText(under: main ?? webArea ?? window, maxChars: 600), max: Limits.excerpt)
+        if !excerpt.isEmpty { metadata["excerpt"] = .string(excerpt) }
+        // Counts only, never content.
+        log.info("snapshot: url=\(metadata["url"] != nil) web=\(webArea != nil) main=\(main != nil) visibleRange=\(visible != nil) excerptChars=\(excerpt.count)")
+        send(.contentSnapshot, metadata: metadata)
+        return true
+    }
+
+    /// For native document editors (Pages, Word, TextEdit, Xcode): the text actually on screen,
+    /// not the file's start. Deliberately *not* for single-line fields or anything inside a web
+    /// page: those are search boxes, forms and chat inputs, i.e. what the user is typing.
+    private func visibleTextOfFocusedElement() -> String? {
+        guard let element = axElement(axApp, kAXFocusedUIElementAttribute), !isSecure(element),
+              axString(element, kAXRoleAttribute) == kAXTextAreaRole,
+              !isInsideWebArea(element) else { return nil }
+        guard let rangeValue = axValue(element, kAXVisibleCharacterRangeAttribute),
+              CFGetTypeID(rangeValue) == AXValueGetTypeID() else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(unsafeDowncast(rangeValue, to: AXValue.self), .cfRange, &range),
+              range.length > 0,
+              let param = AXValueCreate(.cfRange, &range) else { return nil }
+        var text: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXStringForRangeParameterizedAttribute as CFString, param, &text) == .success,
+              let string = text as? String else { return nil }
+        let clipped = ContentText.clip(string, max: Limits.excerpt)
+        return clipped.isEmpty ? nil : clipped
+    }
+
+    // MARK: Selection
+
+    private func scheduleSelection(from element: AXUIElement) {
+        selectionTask?.cancel()
+        selectionTask = Task { [weak self] in
+            // Wait for the drag/shift-select to finish.
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self, self.running else { return }
+            self.reportSelection(from: element)
+        }
+    }
+
+    private func reportSelection(from element: AXUIElement) {
+        guard !isSecure(element), let raw = axString(element, kAXSelectedTextAttribute) else { return }
+        let text = ContentText.clip(raw, max: Limits.selection)
+        guard text.count >= Limits.minSelection, text != lastSelection else { return }
+        lastSelection = text
+        send(.selection, metadata: ["text": .string(text), "length": .int(raw.count)])
     }
 
     // MARK: Accessibility observer (per frontmost app)
@@ -147,6 +252,8 @@ final class ActivityObserver {
         let app = AXUIElementCreateApplication(pid)
         // Never let a hung app stall our main thread for long.
         AXUIElementSetMessagingTimeout(app, 0.25)
+        // Chromium browsers only build their web accessibility tree when an assistive app asks.
+        if Self.chromiumBrowsers.contains(bundleId) { enableManualAccessibility(app) }
 
         var observer: AXObserver?
         let callback: AXObserverCallback = { _, element, notification, refcon in
@@ -159,13 +266,27 @@ final class ActivityObserver {
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         for name in [kAXFocusedWindowChangedNotification, kAXTitleChangedNotification,
-                     kAXWindowCreatedNotification, kAXSheetCreatedNotification] {
+                     kAXWindowCreatedNotification, kAXSheetCreatedNotification,
+                     kAXSelectedTextChangedNotification] {
             AXObserverAddNotification(observer, app, name as CFString, refcon)
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
         axObserver = observer
         axApp = app
     }
+
+    private static let editableRoles: Set<String> = [
+        kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField",
+    ]
+
+    private func enableManualAccessibility(_ app: AXUIElement) {
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    }
+
+    private static let chromiumBrowsers: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.brave.Browser",
+        "com.microsoft.edgemac", "company.thebrowser.Browser", "com.vivaldi.Vivaldi",
+    ]
 
     private func detachAX() {
         if let axObserver {
@@ -189,6 +310,8 @@ final class ActivityObserver {
             scheduleFocusEmit(cause: "title_changed")
         case kAXWindowCreatedNotification, kAXSheetCreatedNotification:
             inspectForErrorDialog(element)
+        case kAXSelectedTextChangedNotification:
+            scheduleSelection(from: element)
         default:
             break
         }
@@ -207,8 +330,7 @@ final class ActivityObserver {
             || subrole == kAXDialogSubrole || subrole == kAXSystemDialogSubrole
         guard isDialog else { return }
 
-        var texts: [String] = []
-        collectStaticText(element, into: &texts, depth: 0)
+        let texts = collectText(under: element, maxChars: 1_000)
         guard ErrorSignature.looksLikeError(texts) else { return }
 
         // The same dialog arrives via WindowCreated *and* via focus/activation; report it once.
@@ -218,22 +340,12 @@ final class ActivityObserver {
         send(.errorDialog, metadata: [
             "signature": .string(ErrorSignature.make(from: texts)),
             "role": .string(subrole ?? role ?? ""),
+            "text": .string(ContentText.clip(joining: texts, max: Limits.dialogText)),
         ])
     }
 
     private func inspectFocusedWindowForErrorDialog() {
         if let window = axElement(axApp, kAXFocusedWindowAttribute) { inspectForErrorDialog(window) }
-    }
-
-    private func collectStaticText(_ element: AXUIElement, into texts: inout [String], depth: Int) {
-        guard depth < 6, texts.count < 30 else { return }
-        if axString(element, kAXRoleAttribute) == kAXStaticTextRole,
-           let value = axString(element, kAXValueAttribute), !value.isEmpty {
-            texts.append(value)
-        }
-        for child in axChildren(element) {
-            collectStaticText(child, into: &texts, depth: depth + 1)
-        }
     }
 
     // MARK: Keys and idle
@@ -278,6 +390,14 @@ final class ActivityObserver {
 
     // MARK: Helpers
 
+    private enum Limits {
+        static let excerpt = 500
+        static let selection = 500
+        static let minSelection = 15
+        static let dialogText = 200
+        static let walkElements = 400
+    }
+
     private func send(_ type: TKGEventType, timestamp: Double = Date().timeIntervalSince1970,
                       metadata: [String: MetadataValue] = [:]) {
         guard bundleId != ownBundleId else { return }
@@ -287,6 +407,84 @@ final class ActivityObserver {
 
     private func readFocusedWindowTitle() -> String? {
         axElement(axApp, kAXFocusedWindowAttribute).flatMap { axString($0, kAXTitleAttribute) }
+    }
+
+    /// Depth-first walk in document order collecting static text, capped by characters and
+    /// elements visited. (Breadth-first ran out of budget in big web pages' layout containers
+    /// before reaching any text.) Secure fields are skipped entirely, never read.
+    private func collectText(under root: AXUIElement, maxChars: Int) -> [String] {
+        var stack = [root], texts: [String] = [], chars = 0, visited = 0
+        while let element = stack.popLast(), chars < maxChars, visited < Limits.walkElements {
+            visited += 1
+            let role = axString(element, kAXRoleAttribute)
+            // Skip editable subtrees entirely: in web pages, text typed into chat boxes, search
+            // fields and forms is exposed as ordinary text under them.
+            if isSecure(element) || Self.editableRoles.contains(role ?? "") { continue }
+            if role == kAXStaticTextRole,
+               let value = axString(element, kAXValueAttribute),
+               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                texts.append(value)
+                chars += value.count
+            }
+            stack.append(contentsOf: axChildren(element).reversed())
+        }
+        return texts
+    }
+
+    /// The page content's web area. Searching down from the window runs out of budget in browser
+    /// chrome (tab strip, toolbars, bookmarks), so start from something inside the page, either the
+    /// element at the window's center or the focused element, and walk up to the nearest web area.
+    private func findWebArea(in window: AXUIElement) -> AXUIElement? {
+        let starts = [elementAtCenter(of: window), axElement(axApp, kAXFocusedUIElementAttribute)]
+        for start in starts.compactMap({ $0 }) {
+            var element: AXUIElement? = start
+            for _ in 0..<80 {
+                guard let current = element else { break }
+                if axString(current, kAXRoleAttribute) == "AXWebArea" { return current }
+                element = axElement(current, kAXParentAttribute)
+            }
+        }
+        return nil
+    }
+
+    private func isInsideWebArea(_ element: AXUIElement) -> Bool {
+        var current = axElement(element, kAXParentAttribute)
+        for _ in 0..<80 {
+            guard let el = current else { return false }
+            if axString(el, kAXRoleAttribute) == "AXWebArea" { return true }
+            current = axElement(el, kAXParentAttribute)
+        }
+        return false
+    }
+
+    private func elementAtCenter(of window: AXUIElement) -> AXUIElement? {
+        guard let axApp,
+              let posValue = axValue(window, kAXPositionAttribute), CFGetTypeID(posValue) == AXValueGetTypeID(),
+              let sizeValue = axValue(window, kAXSizeAttribute), CFGetTypeID(sizeValue) == AXValueGetTypeID()
+        else { return nil }
+        var origin = CGPoint.zero, size = CGSize.zero
+        AXValueGetValue(unsafeDowncast(posValue, to: AXValue.self), .cgPoint, &origin)
+        AXValueGetValue(unsafeDowncast(sizeValue, to: AXValue.self), .cgSize, &size)
+        var hit: AXUIElement?
+        let result = AXUIElementCopyElementAtPosition(
+            axApp, Float(origin.x + size.width / 2), Float(origin.y + size.height / 2), &hit)
+        return result == .success ? hit : nil
+    }
+
+    /// Breadth-first: landmarks sit near the top of a web area's tree.
+    private func findElement(in root: AXUIElement, where matches: (AXUIElement) -> Bool) -> AXUIElement? {
+        var queue = [root], index = 0
+        while index < queue.count, index < Limits.walkElements {
+            let element = queue[index]
+            index += 1
+            if matches(element) { return element }
+            queue.append(contentsOf: axChildren(element))
+        }
+        return nil
+    }
+
+    private func isSecure(_ element: AXUIElement) -> Bool {
+        axString(element, kAXSubroleAttribute) == kAXSecureTextFieldSubrole
     }
 }
 
@@ -301,6 +499,15 @@ private func axValue(_ element: AXUIElement?, _ attribute: String) -> CFTypeRef?
 
 private func axString(_ element: AXUIElement?, _ attribute: String) -> String? {
     axValue(element, attribute) as? String
+}
+
+/// URL-valued attributes come back as CFURL (AXURL) or sometimes a string (AXDocument).
+private func axURL(_ element: AXUIElement?, _ attribute: String) -> String? {
+    switch axValue(element, attribute) {
+    case let url as URL: url.absoluteString
+    case let string as String where !string.isEmpty: string
+    default: nil
+    }
 }
 
 private func axElement(_ element: AXUIElement?, _ attribute: String) -> AXUIElement? {
