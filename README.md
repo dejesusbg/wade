@@ -106,6 +106,10 @@ not produce.
 The set is **constructed**, so passing it shows the rules behave as designed, not that they
 predict need. That's Phase 7.
 
+**Privacy check on-device** (2026-09-23): a fake password typed into a login field and text
+typed into a web text box never appeared in any event. Chrome's address bar auto-selecting its
+URL on click did produce `selection` events, which is why single-line inputs are now ignored.
+
 **First real sample** (14 min, 2026-09-23): 30 checks/hour (4 settled, 1 selection, 1 audit,
 1 stuck). The stuck check came from the developer's own test loop (Finder↔Chrome after an idle
 minute).
@@ -127,7 +131,7 @@ access in System Settings stops observation within about a second.
 |---|---|---|
 | `focus_change` | app activation / AX focused-window change (300ms settle); focused-window title change only once stable for 2s, so title spinners and progress counters don't read as context switches; deduped | `cause`, `app_name` |
 | `content_snapshot` | 4s after a focus change, if still there: the top-level page/document URL, plus a ≤500-char excerpt. Native editors: the visible text range. Web pages: page text from the `main` landmark or the web area under the window center | `url`, `excerpt`, `app_name` |
-| `selection` | AX selected-text change, 1s debounce, ≥15 chars | `text` (≤500), `length` |
+| `selection` | AX selected-text change, 1s debounce, ≥15 chars; ignored in single-line inputs (address bars, search boxes, form fields auto-select their content on click) | `text` (≤500), `length` |
 | `error_dialog` | a sheet/dialog with error-like text (EN+ES keywords), found on window creation, focus change, or app activation; each dialog is reported once, while a new dialog with the same text counts as a recurrence | `signature` (16-hex hash, digits masked), `role`, `text` (≤200) |
 | `keypress_burst` | global keyDown monitor → typing runs (gap 2s, ≥5 keys), closed on focus change | `key_count`, `duration_s`, `started_at` |
 | `undo` | global keyDown monitor, ⌘Z | none |

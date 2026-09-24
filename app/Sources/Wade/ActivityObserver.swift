@@ -238,7 +238,12 @@ final class ActivityObserver {
     }
 
     private func reportSelection(from element: AXUIElement) {
-        guard !isSecure(element), let raw = axString(element, kAXSelectedTextAttribute) else { return }
+        // Single-line inputs (address bars, search boxes, form fields) select their whole content
+        // automatically on click, so a "selection" there is what's typed in the field, not text the
+        // user chose. Page text and multi-line editors still count.
+        let role = axString(element, kAXRoleAttribute) ?? ""
+        guard !isSecure(element), !Self.singleLineInputRoles.contains(role),
+              let raw = axString(element, kAXSelectedTextAttribute) else { return }
         let text = ContentText.clip(raw, max: Limits.selection)
         guard text.count >= Limits.minSelection, text != lastSelection else { return }
         lastSelection = text
@@ -274,6 +279,10 @@ final class ActivityObserver {
         axObserver = observer
         axApp = app
     }
+
+    private static let singleLineInputRoles: Set<String> = [
+        kAXTextFieldRole, kAXComboBoxRole, "AXSearchField",
+    ]
 
     private static let editableRoles: Set<String> = [
         kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField",
