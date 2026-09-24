@@ -39,7 +39,8 @@ def cmd_build(args) -> None:
             else corpus.CALIBRATION[: args.prompts]
         checkpoint = Path(str(args.out)).with_suffix(".checkpoint.npz")
         jl = build(lm, prompts, layers, batch=args.batch, max_tokens=args.max_tokens,
-                   checkpoint=checkpoint, cooldown_s=args.cooldown)
+                   checkpoint=checkpoint, cooldown_s=args.cooldown,
+                   long_cooldown_s=args.long_cooldown, long_every=args.long_every)
         checkpoint.unlink(missing_ok=True)
     jl.save(args.out)
     print(f"saved {args.out} ({jl.meta['variant']}) in {(time.time() - t0) / 60:.1f} min")
@@ -105,6 +106,8 @@ def main() -> None:
     b.add_argument("--batch", type=int, default=16)
     b.add_argument("--max-tokens", type=int, default=48)
     b.add_argument("--cooldown", type=float, default=0.0, help="seconds to pause after each prompt")
+    b.add_argument("--long-cooldown", type=float, default=0.0, help="longer pause every --long-every prompts")
+    b.add_argument("--long-every", type=int, default=0)
     b.add_argument("--out", default=DEFAULT_PATH)
     b.add_argument("--identity", action="store_true", help="J = I (logit lens); no Jacobians, seconds")
     sub.add_parser("validate")

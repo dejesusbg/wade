@@ -164,11 +164,14 @@ def build(
     progress: Callable[[str], None] = print,
     checkpoint: Path | None = None,
     cooldown_s: float = 0.0,
+    long_cooldown_s: float = 0.0,
+    long_every: int = 0,
 ) -> JLens:
     """Estimate J_ℓ for the given layers from `prompts` (see module docstring).
 
     `checkpoint`: saved after every prompt and resumed from if present (same layers), so a long
-    build survives interruption. `cooldown_s`: pause after each prompt to limit sustained heat."""
+    build survives interruption. `cooldown_s`: pause after each prompt to limit sustained heat;
+    every `long_every` prompts the pause is `long_cooldown_s` instead (Pomodoro-style)."""
     layers = list(layers or lm.mid_layers())
     d = lm.d_model
     acc = {l: np.zeros((d, d), dtype=np.float64) for l in layers}
@@ -233,8 +236,10 @@ def build(
         elapsed = time.time() - t0
         progress(f"J: prompt {p_idx + 1}/{len(prompts)} ({T} tokens), {elapsed / fresh:.0f}s/prompt, "
                  f"eta {elapsed / fresh * (len(prompts) - p_idx - 1) / 60:.0f} min")
-        if cooldown_s:
-            time.sleep(cooldown_s)
+        long = long_every and (p_idx + 1) % long_every == 0
+        pause = long_cooldown_s if long else cooldown_s
+        if pause and p_idx + 1 < len(prompts):
+            time.sleep(pause)
 
     J = {l: mx.array((acc[l] / used).astype(np.float32)) for l in layers}
     rms_ref = float(np.mean(rms_samples))
