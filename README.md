@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 2 (TKG + Stage 1 moments) done, check-in pending before Phase 3
+## Status: Phase 3 (Stage 2 J-lens) in progress, decision pending (see Stage 2 findings)
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -121,6 +121,41 @@ it's opt-in, and `*.jsonl` is gitignored). The replay prints checks per hour by 
 cd backend && uv run wade-backend --record ~/wade-session.jsonl   # -v logs every event + score
 uv run wade-replay ~/wade-session.jsonl [--all]
 ```
+
+### Stage 2: J-lens trigger (Phase 3, in progress)
+
+The model is `mlx-community/Qwen3-4B-Instruct-2507-4bit`, loaded in 0.7s and run block by block.
+Install it with `uv sync --extra stage2`. Stage 2 is optional: without it the backend runs
+Stage 1 only.
+
+```sh
+uv run wade-stage2 build [--identity]   # J_ℓ precompute (slow) or J = I (seconds)
+uv run wade-stage2 validate             # J-lens vs logit lens, top-5 agreement, held-out text
+uv run wade-stage2 eval -v              # synthetic scenarios → Stage 2 → modes, concepts, latency
+```
+
+**Findings so far (2026-09-23):**
+- **Latency:** median 0.93–0.97s, p95 0.98s per check on the M5. One prefill with no
+  generation, plus J-space decomposition at 5 layers.
+- **J-lens definition:** J must map into the **pre-norm** final residual, with the model's own
+  norm applied after J, so that J = I is exactly the logit lens. Using the post-norm residual
+  zeroes h's own direction, because RMSNorm is scale-invariant.
+- **The learned J loses to the logit lens** at every layer, when estimated from 3–8 prompts (at
+  L32: about 60% vs 82.5% top-5). All three estimators behave the same way: pairs, present-only
+  and per-source. So does linearizing around the mean. That points to estimation noise. One
+  prompt costs about 3 minutes of M5 GPU time, so the paper's 1,000 prompts would take about
+  50 hours here.
+- **Current lens: J = I** (the logit lens, the paper's named special case), built with
+  `build --identity`. It is **not** the full J-lens, and nothing downstream should call it that.
+- **Scenario eval with J = I:** 5 of 14 correct (only the quiet audits).
+  - The **prompt** matters. A yes/no question fills J-space with "yes"/"if"/"none". Listing
+    Wade's affordances and asking for one verb makes the model's *output* mostly right: fix,
+    grant, check, clone, summarize, compare.
+  - The **J-space holds the right concepts but fragmented**: word pieces ("ex", "summariz"),
+    Chinese tokens (检查 "check", 尝试 "try"), and filler ("if", "answer"). So family scores stay
+    below the null family. This is the paper's single-token limitation (§2, §8) in practice.
+  - The output alone would also **false-fire on routine audits** ("explain" during focused
+    coding), which is why the output isn't used as the trigger.
 
 ### What the app observes
 

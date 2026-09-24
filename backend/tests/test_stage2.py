@@ -12,6 +12,21 @@ mx = pytest.importorskip("mlx.core")
 from wade_backend.stage2.jlens import JLens, _nnls  # noqa: E402
 
 
+class _Norm:
+    """Unit-gain RMSNorm, like the model's final norm."""
+
+    def __init__(self, d: int) -> None:
+        self.weight = mx.ones((d,))
+
+    def __call__(self, x):
+        return x / mx.sqrt(mx.mean(x * x, axis=-1, keepdims=True) + 1e-6) * self.weight
+
+
+class _Inner:
+    def __init__(self, d: int) -> None:
+        self.norm = _Norm(d)
+
+
 class FakeLM:
     """A 'model' whose unembedding is a small known matrix, so decompositions are checkable."""
 
@@ -19,6 +34,8 @@ class FakeLM:
 
     def __init__(self, W: np.ndarray) -> None:
         self.W = mx.array(W.astype(np.float32))
+        self.d_model = W.shape[1]
+        self.inner = _Inner(W.shape[1])
 
     def head(self, x):
         return x @ self.W.T
@@ -58,11 +75,14 @@ def test_nnls():
     assert np.all(_nnls(A, np.array([-1.0, -1.0, -2.0])) >= 0)
 
 
-def test_lens_projection_rescales_to_reference_rms():
-    jl = _toy_lens(np.eye(4))
-    jl.rms_ref = 3.0
-    v = jl.project(0, mx.array([[10.0, 0.0, 0.0, 0.0]]))
-    assert float(mx.sqrt(mx.mean(v * v))) == pytest.approx(3.0, rel=1e-4)
+def test_identity_jacobian_is_the_logit_lens():
+    """With J = I, lens(h) must be exactly softmax(W_U · norm(h)), as the paper states."""
+    rng = np.random.default_rng(1)
+    W = rng.normal(size=(12, 6))
+    lm, jl = FakeLM(W), _toy_lens(W)
+    h = mx.array(rng.normal(size=(2, 6)).astype(np.float32))
+    expected = mx.softmax(lm.head(lm.inner.norm(h)), axis=-1)
+    assert np.abs(np.array(jl.lens(lm, 0, h)) - np.array(expected)).max() < 1e-4  # GPU matmul rounding
 
 
 # ---- anchors & prompt ----------------------------------------------------------------------
@@ -88,7 +108,7 @@ def test_prompt_has_context_and_digest_and_skips_missing_fields():
     assert "- App: Chrome" in text and "https://github.com/a/b" in text and '"Clone HTTPS"' in text
     assert "Recent activity: In Chrome (github.com) for 15s." in text
     assert "Selected text" not in text and "Error message" not in text
-    assert text.endswith("Answer in one word.")
+    assert text.endswith("if they are fine on their own.") and "Wade can:" in text
 
 
 def test_trigger_fired_carries_mode_and_kind():

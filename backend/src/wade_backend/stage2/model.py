@@ -78,6 +78,26 @@ class LensModel:
                 captured[i] = h
         return captured, self.inner.norm(h)
 
+    def prefix(self, tokens: mx.array, upto: int) -> tuple[mx.array, object]:
+        """h_upto (output of block `upto`) and the attention mask, computed once."""
+        h = self.inner.embed_tokens(tokens)
+        mask = create_attention_mask(h, None)
+        for layer in self.inner.layers[: upto + 1]:
+            h = layer(h, mask, None)
+        return h, mask
+
+    def suffix(self, h: mx.array, mask, start: int, deltas: dict[int, mx.array],
+               prenorm: bool = False) -> mx.array:
+        """h_final from h_start (output of block `start`), adding deltas[ℓ] to h_ℓ for ℓ ≥ start.
+        `prenorm=True` returns the last block's output *before* the final RMSNorm."""
+        if start in deltas:
+            h = h + deltas[start]
+        for i in range(start + 1, self.n_layers):
+            h = self.inner.layers[i](h, mask, None)
+            if i in deltas:
+                h = h + deltas[i]
+        return h if prenorm else self.inner.norm(h)
+
     def encode(self, text: str) -> list[int]:
         return self.tokenizer.encode(text)
 

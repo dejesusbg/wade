@@ -27,8 +27,8 @@ FAMILIES: dict[str, tuple[str, ...]] = {
                   "discount", "alternative", "alternatives"),
 }
 
-NULL_FAMILY: tuple[str, ...] = ("nothing", "none", "fine", "continue", "unnecessary", "routine",
-                                "normal", "wait", "quiet")
+NULL_FAMILY: tuple[str, ...] = ("nothing", "none", "no", "fine", "continue", "unnecessary",
+                                "routine", "normal", "wait", "quiet")
 
 WORD_TO_FAMILY: dict[str, str] = {w: fam for fam, words in FAMILIES.items() for w in words}
 NULL_WORDS = frozenset(NULL_FAMILY)

@@ -15,7 +15,7 @@ from dataclasses import replace
 from .. import synthetic
 from ..tkg import CheckRequest, Stage1
 from . import corpus
-from .jlens import DEFAULT_PATH, JLens, build, validate
+from .jlens import DEFAULT_PATH, JLens, build, identity, validate
 from .model import DEFAULT_REPO, LensModel
 
 
@@ -32,9 +32,12 @@ def cmd_build(args) -> None:
     layers = lm.mid_layers(args.layers)
     print(f"{lm.repo}: {lm.n_layers} layers, d_model {lm.d_model}; J-lens layers {layers}")
     t0 = time.time()
-    jl = build(lm, corpus.CALIBRATION[: args.prompts], layers, batch=args.batch)
+    if args.identity:
+        jl = identity(lm, layers)
+    else:
+        jl = build(lm, corpus.CALIBRATION[: args.prompts], layers, batch=args.batch)
     jl.save(args.out)
-    print(f"saved {args.out} in {(time.time() - t0) / 60:.1f} min")
+    print(f"saved {args.out} ({jl.meta['variant']}) in {(time.time() - t0) / 60:.1f} min")
     _print_validation(validate(lm, jl, corpus.VALIDATION))
 
 
@@ -93,6 +96,7 @@ def main() -> None:
     b.add_argument("--layers", type=int, default=5)
     b.add_argument("--batch", type=int, default=32)
     b.add_argument("--out", default=DEFAULT_PATH)
+    b.add_argument("--identity", action="store_true", help="J = I (logit lens); no Jacobians, seconds")
     sub.add_parser("validate")
     e = sub.add_parser("eval")
     e.add_argument("--threshold", type=float, default=0.02)
