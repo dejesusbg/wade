@@ -111,6 +111,7 @@ class Scenario:
     build: Callable[[], Session]
     expect: frozenset[str] = frozenset()  # moment kinds that must occur
     forbid: frozenset[str] = frozenset()  # moment kinds that must not occur
+    stage2: str | None = None  # mode Stage 2 should fire in for its non-audit checks (None: stay quiet)
 
 
 # ---- stuck -------------------------------------------------------------------------------
@@ -120,7 +121,7 @@ def build_loop() -> Session:
     """The brief's example: a build error recurring while flipping to the browser for answers."""
     s = Session().focus(XCODE, "Wade — ActivityObserver.swift").type(60, 20)
     for _ in range(3):
-        s.wait(5).error("build-failed-7f3a")
+        s.wait(5).error("build-failed-7f3a", "Build Failed: Command CompileSwift failed with a nonzero exit code. Cannot find 'AXObserver' in scope.")
         s.pingpong(XCODE, SAFARI, 2, 12, "Wade — ActivityObserver.swift", "AXObserver crash - Stack Overflow")
         s.type(15, 6)
     return s
@@ -129,26 +130,28 @@ def build_loop() -> Session:
 def undo_storm_with_error() -> Session:
     """Editing, undoing, retrying, hitting the same export error twice."""
     s = Session().focus(PAGES, "Thesis draft").type(80, 30)
-    s.wait(10).error("export-failed-11aa")
+    s.wait(10).error("export-failed-11aa", "The document “Thesis draft” could not be exported as PDF. An unknown error occurred.")
     s.undo(3).type(10, 5).undo(2)
-    s.wait(20).error("export-failed-11aa")
+    s.wait(20).error("export-failed-11aa", "The document “Thesis draft” could not be exported as PDF. An unknown error occurred.")
     return s
 
 
 def permission_hunt() -> Session:
     """Terminal ↔ System Settings, the same 'permission denied' error twice."""
-    s = Session().focus(TERMINAL, "zsh").type(20, 5).error("permission-denied-0c1d")
+    denied = "Operation not permitted: Terminal does not have Full Disk Access."
+    s = Session().focus(TERMINAL, "zsh").type(20, 5).error("permission-denied-0c1d", denied)
     s.pingpong(TERMINAL, SETTINGS, 6, 10, "zsh", "Privacy & Security")
-    s.type(12, 4).error("permission-denied-0c1d")
+    s.type(12, 4).error("permission-denied-0c1d", denied)
     return s
 
 
 def stare_then_scramble() -> Session:
     """A long pause after an error, then the error again and a burst of switching."""
-    s = Session().focus(XCODE, "Package.swift").error("resolve-failed-9e2b")
+    failed = "Failed to resolve dependencies: the package 'swift-collections' could not be found."
+    s = Session().focus(XCODE, "Package.swift").error("resolve-failed-9e2b", failed)
     s.idle(90)
     s.pingpong(XCODE, CHROME, 4, 8, "Package.swift", "SwiftPM dependency resolution failed")
-    s.error("resolve-failed-9e2b")
+    s.error("resolve-failed-9e2b", failed)
     return s
 
 
@@ -294,10 +297,10 @@ def short_selection() -> Session:
 
 SCENARIOS: dict[str, Scenario] = {
     # stuck
-    "build_loop": Scenario(build_loop, expect=frozenset({"stuck"})),
-    "undo_storm_with_error": Scenario(undo_storm_with_error, expect=frozenset({"stuck"})),
-    "permission_hunt": Scenario(permission_hunt, expect=frozenset({"stuck"})),
-    "stare_then_scramble": Scenario(stare_then_scramble, expect=frozenset({"stuck"})),
+    "build_loop": Scenario(build_loop, expect=frozenset({"stuck"}), stage2="fixing"),
+    "undo_storm_with_error": Scenario(undo_storm_with_error, expect=frozenset({"stuck"}), stage2="fixing"),
+    "permission_hunt": Scenario(permission_hunt, expect=frozenset({"stuck"}), stage2="fixing"),
+    "stare_then_scramble": Scenario(stare_then_scramble, expect=frozenset({"stuck"}), stage2="fixing"),
     # routine
     "focused_coding": Scenario(focused_coding, forbid=frozenset({"stuck"})),
     "reading": Scenario(reading, forbid=frozenset({"stuck"})),
@@ -309,11 +312,11 @@ SCENARIOS: dict[str, Scenario] = {
     "morning_startup": Scenario(morning_startup, forbid=frozenset({"stuck"})),
     "errors_far_apart": Scenario(errors_far_apart, forbid=frozenset({"stuck"})),
     # opportunities
-    "repo_page": Scenario(repo_page, expect=frozenset({"settled"}), forbid=frozenset({"stuck"})),
-    "cite_selection": Scenario(cite_selection, expect=frozenset({"selection"}), forbid=frozenset({"stuck"})),
-    "reading_paper": Scenario(reading_paper, expect=frozenset({"settled"}), forbid=frozenset({"stuck"})),
-    "flight_search": Scenario(flight_search, expect=frozenset({"settled"}), forbid=frozenset({"stuck"})),
-    "compare_products": Scenario(compare_products, expect=frozenset({"settled"}), forbid=frozenset({"stuck"})),
+    "repo_page": Scenario(repo_page, expect=frozenset({"settled"}), forbid=frozenset({"stuck"}), stage2="coding"),
+    "cite_selection": Scenario(cite_selection, expect=frozenset({"selection"}), forbid=frozenset({"stuck"}), stage2="writing"),
+    "reading_paper": Scenario(reading_paper, expect=frozenset({"settled"}), forbid=frozenset({"stuck"}), stage2="researching"),
+    "flight_search": Scenario(flight_search, expect=frozenset({"settled"}), forbid=frozenset({"stuck"}), stage2="comparing"),
+    "compare_products": Scenario(compare_products, expect=frozenset({"settled"}), forbid=frozenset({"stuck"}), stage2="comparing"),
     # non-moments
     "quick_glances": Scenario(quick_glances, forbid=frozenset({"settled", "stuck"})),
     "short_selection": Scenario(short_selection, forbid=frozenset({"selection", "stuck"})),

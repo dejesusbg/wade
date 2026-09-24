@@ -73,8 +73,12 @@ def trigger_fired(
     jspace_concepts: list[str],
     tkg_digest: str,
     timestamp: float,
+    mode: str | None = None,
+    kind: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    """`mode` (the winning anchor family, e.g. "coding") and `kind` (the Stage 1 moment) extend
+    the brief's shape; the app ignores fields it doesn't know."""
+    message = {
         "type": "trigger_fired",
         "suggestion_id": suggestion_id,
         "gate_score": gate_score,
@@ -82,3 +86,8 @@ def trigger_fired(
         "tkg_digest": tkg_digest,
         "timestamp": timestamp,
     }
+    if mode:
+        message["mode"] = mode
+    if kind:
+        message["kind"] = kind
+    return message

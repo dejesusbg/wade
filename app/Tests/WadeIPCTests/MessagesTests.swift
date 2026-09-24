@@ -27,6 +27,13 @@ import Testing
         }
         #expect(t.suggestionId == "abc")
         #expect(t.jspaceConcepts == ["stuck", "error"])
+        #expect(t.mode == nil)
+
+        let withMode = Data(#"{"type":"trigger_fired","suggestion_id":"s","gate_score":0,"jspace_concepts":["clone"],"tkg_digest":"d","timestamp":1.0,"mode":"coding","kind":"settled"}"#.utf8)
+        guard case .triggerFired(let m) = try Wire.decodeInbound(withMode) else {
+            Issue.record("expected trigger_fired"); return
+        }
+        #expect(m.mode == "coding" && m.kind == "settled")
     }
 
     @Test func newEventTypesUseBackendNames() throws {

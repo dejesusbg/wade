@@ -79,6 +79,10 @@ public struct TriggerFired: Codable, Sendable, Equatable {
     public var jspaceConcepts: [String]
     public var tkgDigest: String
     public var timestamp: Double
+    /// Winning anchor family, e.g. "coding" → "wade is coding…". Optional: extends the brief's shape.
+    public var mode: String?
+    /// The Stage 1 moment that led here: stuck, selection, settled.
+    public var kind: String?
 }
 
 /// Liveness check only; not part of the trigger protocol proper.

@@ -95,6 +95,10 @@ struct MenuContent: View {
             if let e = model.lastEvent {
                 Text("Last: \(e.eventType.rawValue) · \(e.appBundleId)")
             }
+            if let t = model.lastTrigger {
+                // Placeholder until the Phase 6 popover: shows Stage 2 fires as they arrive.
+                Text("wade is \(t.mode ?? "thinking")… · \(t.jspaceConcepts.prefix(3).joined(separator: ", "))")
+            }
         }
         Divider()
         Button(model.memory.onboardingCompleted ? "Setup…" : "Finish Setup…") {

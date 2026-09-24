@@ -5,9 +5,14 @@ description = "Wade interpretability core: TKG gate (Stage 1) and J-lens trigger
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+# Stage 2 (J-lens on a local MLX model). Optional so Stage 1 runs and tests without it.
+stage2 = ["mlx>=0.32", "mlx-lm>=0.31", "numpy>=2"]
+
 [project.scripts]
 wade-backend = "wade_backend.__main__:main"
 wade-replay = "wade_backend.replay:main"
+wade-stage2 = "wade_backend.stage2.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]
