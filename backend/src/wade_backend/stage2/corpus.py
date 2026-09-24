@@ -64,3 +64,40 @@ VALIDATION = [
     "The paper proposes a new method for evaluating the accessibility of web content automatically.",
     "I keep getting the same error no matter what I change in the configuration file.",
 ]
+
+
+def extended(n: int, seed: int = 0) -> list[str]:
+    """`n` calibration prompts for a larger J estimate, built offline (no downloads): the
+    hand-written set above, then code and prose (docstrings) sampled from Python's standard
+    library: a deterministic, pretraining-like mix of natural language and code."""
+    import ast
+    import random
+    import sysconfig
+    from pathlib import Path
+
+    rng = random.Random(seed)
+    stdlib = Path(sysconfig.get_paths()["stdlib"])
+    files = sorted(p for p in stdlib.glob("*.py") if p.stat().st_size > 4000)
+    code: list[str] = []
+    prose: list[str] = []
+    for path in files:
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (UnicodeDecodeError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                doc = ast.get_docstring(node)
+                if doc and len(doc) > 200:
+                    prose.append(" ".join(doc.split()))
+                segment = ast.get_source_segment(source, node)
+                if segment and 300 < len(segment) < 3000:
+                    code.append(segment)
+    rng.shuffle(code)
+    rng.shuffle(prose)
+    out = list(CALIBRATION)
+    while len(out) < n and (code or prose):
+        pool = prose if (len(out) % 2 == 0 and prose) or not code else code
+        out.append(pool.pop()[:600])
+    return out[:n]

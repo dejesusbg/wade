@@ -147,15 +147,28 @@ uv run wade-stage2 eval -v              # synthetic scenarios → Stage 2 → mo
   50 hours here.
 - **Current lens: J = I** (the logit lens, the paper's named special case), built with
   `build --identity`. It is **not** the full J-lens, and nothing downstream should call it that.
-- **Scenario eval with J = I:** 5 of 14 correct (only the quiet audits).
+- **Scenario eval with J = I**, first run: 5 of 14 correct (only the quiet audits).
   - The **prompt** matters. A yes/no question fills J-space with "yes"/"if"/"none". Listing
-    Wade's affordances and asking for one verb makes the model's *output* mostly right: fix,
-    grant, check, clone, summarize, compare.
-  - The **J-space holds the right concepts but fragmented**: word pieces ("ex", "summariz"),
-    Chinese tokens (检查 "check", 尝试 "try"), and filler ("if", "answer"). So family scores stay
-    below the null family. This is the paper's single-token limitation (§2, §8) in practice.
-  - The output alone would also **false-fire on routine audits** ("explain" during focused
-    coding), which is why the output isn't used as the trigger.
+    Wade's affordances and asking for one verb makes the model's *output* mostly right.
+  - The **J-space holds the right concepts but fragmented**: word pieces ("summariz"),
+    Chinese tokens (检查 "check"), and filler. Families are now matched as *concepts*:
+    translations plus unambiguous pieces of 4+ characters.
+- **Readout choice, measured.** Reading the **final prompt position** at the lens-validated
+  layers **23/27/32** gives **9 of 14 fire/quiet decisions correct in 375ms** (p95 378ms).
+  - Stuck: 4 of 4 fire as "fixing".
+  - Routine audits: 4 of 5 stay quiet. The one that fires sees a fresh error dialog.
+  - Opportunities: 1 of 5 fire (repo page → coding). The others stay quiet: "nothing"
+    outweighs the action concept. On a comparison page J-space holds *both* "compare" and
+    "nothing", while the model's output picks "compare".
+  - Reading the last 6 positions scores 8 of 14; all 5 layers, 9 of 14 but slower. The
+    threshold was *not* tuned to these 14 hand-written checks.
+- **End to end:** `uv run python scripts/stage2_e2e.py` replays a scenario into a real backend
+  over the socket, with no screen observation. Result: a stuck check → Stage 2 in 437ms →
+  `trigger_fired` with `mode: "fixing"`, the concepts and the digest.
+- **Overnight learned J:** `scripts/overnight-jlens.sh` runs about 120 prompts × 32 tokens, from
+  the hand-written set plus stdlib code and docstrings, in about 7–8h. It keeps the Mac awake
+  with the display off, checkpoints after every prompt, and writes `jlens-learned.npz` plus a
+  validation table. Keep the lid **open** and the Mac plugged in.
 
 ### What the app observes
 

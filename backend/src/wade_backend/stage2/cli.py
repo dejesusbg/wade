@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import statistics
 import time
-from dataclasses import replace
+from pathlib import Path
 
 from .. import synthetic
 from ..tkg import CheckRequest, Stage1
@@ -35,7 +35,12 @@ def cmd_build(args) -> None:
     if args.identity:
         jl = identity(lm, layers)
     else:
-        jl = build(lm, corpus.CALIBRATION[: args.prompts], layers, batch=args.batch)
+        prompts = corpus.extended(args.prompts) if args.prompts > len(corpus.CALIBRATION) \
+            else corpus.CALIBRATION[: args.prompts]
+        checkpoint = Path(str(args.out)).with_suffix(".checkpoint.npz")
+        jl = build(lm, prompts, layers, batch=args.batch, max_tokens=args.max_tokens,
+                   checkpoint=checkpoint, cooldown_s=args.cooldown)
+        checkpoint.unlink(missing_ok=True)
     jl.save(args.out)
     print(f"saved {args.out} ({jl.meta['variant']}) in {(time.time() - t0) / 60:.1f} min")
     _print_validation(validate(lm, jl, corpus.VALIDATION))
@@ -43,7 +48,7 @@ def cmd_build(args) -> None:
 
 def cmd_validate(args) -> None:
     lm = LensModel(args.repo)
-    _print_validation(validate(lm, JLens.load(args.lens), corpus.VALIDATION))
+    _print_validation(validate(lm, JLens.load(Path(str(args.lens))), corpus.VALIDATION))
 
 
 def _print_validation(v: dict) -> None:
@@ -56,12 +61,14 @@ def _print_validation(v: dict) -> None:
 def cmd_eval(args) -> None:
     from .check import Stage2, Stage2Config
 
-    stage2 = Stage2.load(args.repo, args.lens, Stage2Config(threshold=args.threshold))
+    layers = tuple(int(x) for x in args.layers.split(",")) if args.layers else None
+    stage2 = Stage2.load(args.repo, Path(str(args.lens)),
+                         Stage2Config(threshold=args.threshold, positions=args.positions, layers=layers))
     if stage2.split_anchors:
         print(f"note: anchors that aren't single tokens (can't be read directly): {stage2.split_anchors}")
     stage2.evaluate(_checks_for("repo_page")[0])  # warm-up (compile, caches)
 
-    rows, latencies, agree = [], [], 0
+    rows, latencies, agree, fire_ok = [], [], 0, 0
     for name, sc in synthetic.SCENARIOS.items():
         for check in _checks_for(name):
             r = stage2.evaluate(check)
@@ -70,6 +77,7 @@ def cmd_eval(args) -> None:
             got = r.mode
             ok = got == expected
             agree += ok
+            fire_ok += (got is None) == (expected is None)
             rows.append((name, check.kind, expected or "quiet", got or "quiet", ok, r))
     print(f"\n{'scenario':22} {'kind':9} {'expect':11} {'got':11}   concepts (J-space)                      | says")
     for name, kind, exp, got, ok, r in rows:
@@ -80,9 +88,9 @@ def cmd_eval(args) -> None:
             print(f"{'':22} families: best {best} {r.family_scores[best]:.4f}, null {r.null_score:.4f}")
     lat = sorted(latencies)
     p95 = lat[max(0, int(round(0.95 * len(lat))) - 1)]
-    print(f"\nagreement with expected mode: {agree}/{len(rows)}; latency median "
+    print(f"\nfire/quiet correct: {fire_ok}/{len(rows)}; exact mode: {agree}/{len(rows)}; latency median "
           f"{statistics.median(lat):.0f} ms, p95 {p95:.0f} ms, max {lat[-1]:.0f} ms "
-          f"(threshold {args.threshold})")
+          f"(threshold {args.threshold}, positions {args.positions}, layers {args.layers or 'all'})")
 
 
 def main() -> None:
@@ -94,12 +102,16 @@ def main() -> None:
     b = sub.add_parser("build")
     b.add_argument("--prompts", type=int, default=len(corpus.CALIBRATION))
     b.add_argument("--layers", type=int, default=5)
-    b.add_argument("--batch", type=int, default=32)
+    b.add_argument("--batch", type=int, default=16)
+    b.add_argument("--max-tokens", type=int, default=48)
+    b.add_argument("--cooldown", type=float, default=0.0, help="seconds to pause after each prompt")
     b.add_argument("--out", default=DEFAULT_PATH)
     b.add_argument("--identity", action="store_true", help="J = I (logit lens); no Jacobians, seconds")
     sub.add_parser("validate")
     e = sub.add_parser("eval")
-    e.add_argument("--threshold", type=float, default=0.02)
+    e.add_argument("--threshold", type=float, default=0.005)
+    e.add_argument("--positions", type=int, default=1)
+    e.add_argument("--layers", default="23,27,32", help="comma-separated, or '' for all lens layers")
     e.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     {"build": cmd_build, "validate": cmd_validate, "eval": cmd_eval}[args.cmd](args)

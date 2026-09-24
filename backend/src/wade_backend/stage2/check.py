@@ -26,9 +26,12 @@ from .model import DEFAULT_REPO, LensModel
 
 @dataclass(frozen=True)
 class Stage2Config:
-    threshold: float = 0.02  # min family weight (share of residual norm); calibrated by `eval`
+    threshold: float = 0.005  # min family weight (share of residual norm); calibrated by `eval`
     k: int = 16  # J-lens vectors per decomposition (paper: ≤25, 16 for verbal report)
-    positions: int = 6  # last prompt positions read
+    positions: int = 1  # last prompt positions read (1 = where the answer is poised)
+    # Layers read. None: all lens layers. With J = I, only layers where the lens is validated
+    # to track the model (top-5 agreement ≥ 20%: 23, 27, 32) carry signal; earlier ones are noise.
+    layers: tuple[int, ...] | None = (23, 27, 32)
     top_concepts: int = 8
 
 
@@ -68,22 +71,29 @@ class Stage2:
         output_id = int(mx.argmax(self.lm.head(hf[0, -1])))
 
         P = min(self.cfg.positions, len(ids) - 1)
-        weights: dict[str, float] = defaultdict(float)
+        layers = [l for l in self.jl.layers if self.cfg.layers is None or l in self.cfg.layers]
+        weights: dict[str, float] = defaultdict(float)  # by concept (word forms merged)
         per_layer: dict[int, list[tuple[str, float]]] = {}
-        for layer in self.jl.layers:
+        for layer in layers:
             h = caps[layer][0, -P:]
             layer_w: dict[str, float] = defaultdict(float)
             for tokens, coefs in self.jl.decompose(self.lm, layer, h, k=self.cfg.k):
                 for t, c in zip(tokens, coefs):
                     w = self.word(t)
                     if w:
-                        layer_w[w] += c / P
+                        layer_w[anchors.concept(w)] += c / P
             for w, c in layer_w.items():
-                weights[w] += c / len(self.jl.layers)
+                weights[w] += c / len(layers)
             per_layer[layer] = sorted(layer_w.items(), key=lambda x: -x[1])[:5]
 
-        family_scores = {fam: sum(weights.get(w, 0.0) for w in words) for fam, words in anchors.FAMILIES.items()}
-        null_score = sum(weights.get(w, 0.0) for w in anchors.NULL_FAMILY)
+        family_scores = {fam: 0.0 for fam in anchors.FAMILIES}
+        null_score = 0.0
+        for w, c in weights.items():
+            fam = anchors.family_of(w)
+            if fam == "null":
+                null_score += c
+            elif fam:
+                family_scores[fam] += c
         best = max(family_scores, key=family_scores.__getitem__)
         fire = family_scores[best] >= self.cfg.threshold and family_scores[best] > null_score
 

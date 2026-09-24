@@ -117,3 +117,12 @@ def test_trigger_fired_carries_mode_and_kind():
     assert m["mode"] == "coding" and m["kind"] == "settled" and m["type"] == "trigger_fired"
     assert "mode" not in protocol.trigger_fired(suggestion_id="s", gate_score=0.0, jspace_concepts=[],
                                                 tkg_digest="d", timestamp=1.0)
+
+
+def test_concepts_merge_word_pieces_and_translations():
+    assert anchors.concept("summariz") == "summarize"
+    assert anchors.concept("检查") == "check" and anchors.family_of("check") == "fixing"
+    assert anchors.concept("ex") == "ex"  # too short to attribute
+    assert anchors.concept("comp") == "comp"  # compare/comparison: shorter than a unique prefix? stays unmatched
+    assert anchors.family_of(anchors.concept("nada")) == "null"
+    assert anchors.normalize(" 总结") == "总结"
