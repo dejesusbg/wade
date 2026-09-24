@@ -55,7 +55,8 @@ class JLens:
 
     # ---- persistence ------------------------------------------------------------------
 
-    def save(self, path: Path = DEFAULT_PATH) -> None:
+    def save(self, path: Path | str = DEFAULT_PATH) -> None:
+        path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         arrays = {"layers": np.array(self.layers), "rms_ref": np.array(self.rms_ref)}
         for l in self.layers:
@@ -65,8 +66,8 @@ class JLens:
         np.savez(path, **arrays)
 
     @classmethod
-    def load(cls, path: Path = DEFAULT_PATH) -> JLens:
-        data = np.load(path)
+    def load(cls, path: Path | str = DEFAULT_PATH) -> JLens:
+        data = np.load(Path(path))
         layers = [int(l) for l in data["layers"]]
         return cls(
             layers=layers,

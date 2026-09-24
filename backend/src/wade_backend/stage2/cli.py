@@ -41,8 +41,11 @@ def cmd_build(args) -> None:
         jl = build(lm, prompts, layers, batch=args.batch, max_tokens=args.max_tokens,
                    checkpoint=checkpoint, cooldown_s=args.cooldown,
                    long_cooldown_s=args.long_cooldown, long_every=args.long_every)
-        checkpoint.unlink(missing_ok=True)
-    jl.save(args.out)
+    out = Path(str(args.out))
+    jl.save(out)
+    JLens.load(out)  # prove the saved file reads back before anything else happens
+    # The checkpoint is deliberately kept: it's the only copy of hours of compute if anything
+    # downstream goes wrong. Delete it by hand once the lens is verified.
     print(f"saved {args.out} ({jl.meta['variant']}) in {(time.time() - t0) / 60:.1f} min")
     _print_validation(validate(lm, jl, corpus.VALIDATION))
 

@@ -126,3 +126,10 @@ def test_concepts_merge_word_pieces_and_translations():
     assert anchors.concept("comp") == "comp"  # compare/comparison: shorter than a unique prefix? stays unmatched
     assert anchors.family_of(anchors.concept("nada")) == "null"
     assert anchors.normalize(" 总结") == "总结"
+
+
+def test_lens_save_load_accepts_str_paths(tmp_path):
+    jl = _toy_lens(np.eye(4))
+    jl.save(str(tmp_path / "lens.npz"))  # the CLI passes strings
+    back = JLens.load(str(tmp_path / "lens.npz"))
+    assert back.layers == [0] and float(back.J[0][0, 0]) == 1.0
