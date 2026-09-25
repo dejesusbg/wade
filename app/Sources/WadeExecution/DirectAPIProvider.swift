@@ -176,8 +176,10 @@ public struct GeminiWire: DirectWire {
             "generationConfig": ["maxOutputTokens": maxTokens, "thinkingConfig": ["thinkingLevel": "minimal"]],
         ]
         if !tools.isEmpty {
+            // `parametersJsonSchema`, not `parameters`: the latter takes only an OpenAPI subset and
+            // rejects what real MCP servers emit (`x-mcp-header`, `additionalProperties`, type lists).
             body["tools"] = [["functionDeclarations": tools.map {
-                ["name": $0.name, "description": $0.description, "parameters": $0.schemaObject] as [String: Any]
+                ["name": $0.name, "description": $0.description, "parametersJsonSchema": $0.schemaObject] as [String: Any]
             }]]
         }
         r.httpBody = try JSONSerialization.data(withJSONObject: body)
