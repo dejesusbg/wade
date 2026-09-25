@@ -4,7 +4,8 @@ import FoundationModels
 
 /// Apple Foundation Models route (CLAUDE.md §5.5): one `LanguageModelSession` API over any model
 /// that conforms to `LanguageModel`. Here: Apple's on-device model (private, offline) or Claude
-/// via Anthropic's official ClaudeForFoundationModels package.
+/// via Anthropic's official ClaudeForFoundationModels package. Gemini joins this route through
+/// Firebase AI Logic's `GeminiLanguageModel` once a Firebase project is set up.
 ///
 /// This is a black-box request/response interface with no activation access, which is why it's
 /// the execution stage and never Stage 2.
@@ -63,7 +64,7 @@ public struct AFMProvider: ExecutionProvider {
             if let reason = Self.onDeviceUnavailableReason { throw ExecutionError.modelUnavailable(reason) }
             return LanguageModelSession(model: SystemLanguageModel.default, instructions: instructions)
         case .claude(let model, let apiKey):
-            guard let apiKey, !apiKey.isEmpty else { throw ExecutionError.missingAPIKey }
+            guard let apiKey, !apiKey.isEmpty else { throw ExecutionError.missingAPIKey("Anthropic Claude") }
             // `.apiKey` is the package's development mode; shipping would use `.appAttest` or
             // `.proxied` so no key lives in the app (see README, "Execution").
             let claude = ClaudeLanguageModel(name: model, auth: .apiKey(apiKey), timeout: 60)

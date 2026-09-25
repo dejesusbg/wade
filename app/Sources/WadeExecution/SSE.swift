@@ -1,19 +1,21 @@
 import Foundation
 
-/// Minimal Server-Sent Events parser for the Messages API stream: accumulates `event:` / `data:`
+/// Minimal Server-Sent Events parser shared by the direct-API wires: accumulates `event:` / `data:`
 /// lines and emits an event at each blank line. Pure and line-driven, so it's unit-tested
 /// without a network.
-struct SSEParser {
-    struct Event: Equatable {
-        var event: String?
-        var data: String
+public struct SSEParser {
+    public struct Event: Equatable, Sendable {
+        public var event: String?
+        public var data: String
     }
 
     private var event: String?
     private var data: [String] = []
 
+    public init() {}
+
     /// Feed one line (without its trailing newline). Returns an event when a blank line ends one.
-    mutating func feed(_ line: String) -> Event? {
+    public mutating func feed(_ line: String) -> Event? {
         let line = line.hasSuffix("\r") ? String(line.dropLast()) : line
         if line.isEmpty {
             defer { event = nil; data = [] }
@@ -35,35 +37,5 @@ struct SSEParser {
         var value = line[line.index(after: colon)...]
         if value.hasPrefix(" ") { value = value.dropFirst() }
         return (String(line[..<colon]), String(value))
-    }
-}
-
-/// What a Messages API stream event means for us.
-enum MessagesStreamEvent: Equatable {
-    case text(String)
-    case done(stopReason: String?)
-    case error(type: String, message: String)
-    case ignored
-
-    /// Decodes one SSE event's `data` JSON (shapes per the Messages API streaming docs).
-    static func decode(_ event: SSEParser.Event) -> MessagesStreamEvent {
-        guard let json = try? JSONSerialization.jsonObject(with: Data(event.data.utf8)) as? [String: Any],
-              let type = json["type"] as? String else { return .ignored }
-        switch type {
-        case "content_block_delta":
-            let delta = json["delta"] as? [String: Any]
-            if delta?["type"] as? String == "text_delta", let text = delta?["text"] as? String {
-                return .text(text)
-            }
-            return .ignored  // thinking / tool-input deltas: not rendered
-        case "message_delta":
-            let stop = (json["delta"] as? [String: Any])?["stop_reason"] as? String
-            return stop == nil ? .ignored : .done(stopReason: stop)
-        case "error":
-            let err = json["error"] as? [String: Any]
-            return .error(type: err?["type"] as? String ?? "error", message: err?["message"] as? String ?? "")
-        default:
-            return .ignored  // message_start, content_block_start/stop, message_stop, ping
-        }
     }
 }

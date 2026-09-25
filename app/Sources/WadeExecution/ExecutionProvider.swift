@@ -31,21 +31,21 @@ public struct MCPTool: Sendable, Hashable {
 }
 
 public enum ExecutionError: LocalizedError, Equatable {
-    case missingAPIKey
+    case missingAPIKey(String)
     case modelUnavailable(String)
     case http(status: Int, type: String?, message: String)
     case stream(type: String, message: String)
 
     public var errorDescription: String? {
         switch self {
-        case .missingAPIKey:
-            "No Claude API key. Add one in Settings → Suggestions, or switch to the on-device model."
+        case .missingAPIKey(let vendor):
+            "No \(vendor) API key. Add one in Settings → Suggestions."
         case .modelUnavailable(let reason):
             "The model isn't available: \(reason)"
         case .http(let status, let type, let message):
-            "Claude API error \(status)\(type.map { " (\($0))" } ?? ""): \(message)"
+            "API error \(status)\(type.map { " (\($0))" } ?? ""): \(message)"
         case .stream(let type, let message):
-            "Claude stream error (\(type)): \(message)"
+            "Stream error (\(type)): \(message)"
         }
     }
 }

@@ -31,8 +31,11 @@ struct SuggestionView: View {
                 Divider()
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Why: \(s.concepts.prefix(4).joined(separator: ", "))")
-                    Text("\(s.providerName)\(s.sendsDataOffDevice ? " · sent to Anthropic" : " · stayed on this Mac")"
-                         + timing(s))
+                    if !s.providerName.isEmpty {
+                        Text("\(s.providerName)\(s.sendsDataOffDevice ? " · sent to the provider" : " · stayed on this Mac")"
+                             + timing(s))
+                    }
+                    ForEach(s.skipped, id: \.self) { Text("Skipped \($0)") }
                 }
                 .font(.caption).foregroundStyle(.secondary)
             } else {
@@ -55,53 +58,79 @@ struct SuggestionView: View {
     }
 }
 
-/// Settings → Suggestions: which model writes suggestions, and the Claude API key.
+/// Settings → Suggestions: primary and fallback writers (same list, no special cases) and one
+/// API key per cloud vendor.
 struct ExecutionSettingsView: View {
     @Bindable var engine: ExecutionEngine
-    @State private var keyDraft = ""
+    @State private var drafts: [Vendor: String] = [:]
 
     var body: some View {
         Form {
-            Section("Who writes suggestions") {
-                Picker("Model", selection: $engine.selected) {
-                    ForEach(ProviderChoiceList.all) { Text($0.title).tag($0) }
-                }
-                if engine.effective != engine.selected {
-                    Label("No API key yet, so Wade uses Apple's on-device model for now.", systemImage: "info.circle")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
             Section {
-                if engine.hasAPIKey {
-                    LabeledContent("Claude API key") {
-                        HStack {
-                            Text("Saved in your Keychain").foregroundStyle(.secondary)
-                            Button("Remove") { engine.removeAPIKey() }
-                        }
+                Picker("Primary", selection: $engine.primaryID) {
+                    ForEach(ProviderCatalog.all) { d in
+                        Text(label(d)).tag(d.id)
                     }
-                } else {
-                    HStack {
-                        SecureField("sk-ant-…", text: $keyDraft).labelsHidden()
-                        Button("Save") { engine.saveAPIKey(keyDraft); keyDraft = "" }
-                            .disabled(keyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                Picker("Fallback", selection: Binding(get: { engine.fallbackID ?? "" },
+                                                      set: { engine.fallbackID = $0.isEmpty ? nil : $0 })) {
+                    Text("None").tag("")
+                    ForEach(ProviderCatalog.all) { d in
+                        Text(label(d)).tag(d.id)
                     }
                 }
             } header: {
-                Text("Claude API key")
+                Text("Who writes suggestions")
+            } footer: {
+                Text("If the primary can't run (no key, setup missing, rate limit, unavailable), the fallback writes instead. Both come from the same list.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                ForEach(Vendor.allCases.filter(\.needsKey), id: \.self) { vendor in
+                    keyRow(vendor)
+                }
+            } header: {
+                Text("API keys")
             } footer: {
                 Text("""
-                    Watching your screen always stays on this Mac. Only when Wade writes a suggestion \
-                    with Claude is that suggestion's context (what's on screen, recent activity, and \
-                    the facts you gave Wade) sent to Anthropic's API, billed to your key. Apple's \
-                    on-device model keeps everything on this Mac.
+                    Watching your screen always stays on this Mac. Only when a cloud model writes a \
+                    suggestion is that suggestion's context (what's on screen, recent activity, the \
+                    facts you gave Wade) sent to that vendor's API, billed to your key. Keys are \
+                    stored in your Keychain. Apple's on-device model keeps everything on this Mac.
                     """)
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
     }
-}
 
-private enum ProviderChoiceList {
-    static let all = ProviderChoice.allCases
+    private func label(_ d: ProviderDescriptor) -> String {
+        if d.setupRequired != nil { return "\(d.title) (needs setup)" }
+        if d.vendor.needsKey && !engine.keyed.contains(d.vendor) { return "\(d.title) (no key)" }
+        return d.title
+    }
+
+    @ViewBuilder
+    private func keyRow(_ vendor: Vendor) -> some View {
+        LabeledContent(vendor.name) {
+            if engine.keyed.contains(vendor) {
+                HStack {
+                    Text("Saved in Keychain").foregroundStyle(.secondary)
+                    Button("Remove") { engine.removeKey(for: vendor) }
+                }
+            } else {
+                HStack {
+                    SecureField("API key", text: Binding(get: { drafts[vendor, default: ""] },
+                                                         set: { drafts[vendor] = $0 }))
+                        .labelsHidden()
+                        .frame(minWidth: 180)
+                    Button("Save") {
+                        engine.saveKey(drafts[vendor, default: ""], for: vendor)
+                        drafts[vendor] = nil
+                    }
+                    .disabled(drafts[vendor, default: ""].trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
 }
