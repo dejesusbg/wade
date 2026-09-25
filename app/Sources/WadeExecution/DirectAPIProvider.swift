@@ -141,7 +141,9 @@ public struct GeminiWire: DirectWire {
         r.httpBody = try JSONSerialization.data(withJSONObject: [
             "systemInstruction": ["parts": [["text": prompt.instructions]]],
             "contents": [["role": "user", "parts": [["text": prompt.message]]]],
-            "generationConfig": ["maxOutputTokens": maxTokens],
+            // Minimal thinking: a two-sentence suggestion doesn't need reasoning, and thinking
+            // delays the first word. (`thinkingBudget: 0` is rejected by 3.x models; this isn't.)
+            "generationConfig": ["maxOutputTokens": maxTokens, "thinkingConfig": ["thinkingLevel": "minimal"]],
         ] as [String: Any])
         return r
     }

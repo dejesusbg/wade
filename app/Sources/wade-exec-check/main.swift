@@ -33,6 +33,28 @@ if arg == "gemini-models" {
     exit(0)
 }
 
+if arg == "gemini-raw" {
+    // Probe: POST a JSON body file to a Gemini API path and print the raw response lines with
+    // timings. Key from the Keychain, sent in a header, never printed.
+    //   wade-exec-check gemini-raw <path?query> <body.json>
+    let args = Array(CommandLine.arguments.dropFirst(2))
+    guard args.count == 2, let key = APIKeyStore.read(.google),
+          let body = FileManager.default.contents(atPath: args[1]) else { out("usage/key/body missing\n"); exit(2) }
+    var r = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/\(args[0])")!)
+    r.httpMethod = "POST"
+    r.timeoutInterval = 30
+    r.setValue("application/json", forHTTPHeaderField: "content-type")
+    r.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+    r.httpBody = body
+    let t0 = Date()
+    let (bytes, response) = try await URLSession.shared.bytes(for: r)
+    out(String(format: "HTTP %d after %.2fs\n", (response as? HTTPURLResponse)?.statusCode ?? 0, Date().timeIntervalSince(t0)))
+    for try await line in bytes.lines {
+        out(String(format: "[%5.2fs] %@\n", Date().timeIntervalSince(t0), String(line.prefix(300))))
+    }
+    exit(0)
+}
+
 if arg == "list" {
     for d in ProviderCatalog.all {
         let key = !d.vendor.needsKey ? "no key needed" : (APIKeyStore.read(d.vendor) == nil ? "NO KEY" : "key ok")

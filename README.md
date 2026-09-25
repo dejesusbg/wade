@@ -213,15 +213,17 @@ protocol:
 
 | Entry | Route | Leaves the Mac? |
 |---|---|---|
-| **Gemini Flash** (`gemini-flash-latest`), **default primary** | direct API: `streamGenerateContent?alt=sse`, key in `x-goog-api-key` | yes, Google |
+| Gemini Flash (`gemini-flash-latest`) | direct API: `streamGenerateContent?alt=sse`, key in `x-goog-api-key`, `thinkingLevel: minimal` | yes, Google |
+| **Gemini Flash-Lite** (`gemini-flash-lite-latest`), **default fallback** | same | yes, Google |
 | Gemini Flash via Foundation Models | Firebase AI Logic `GeminiLanguageModel`: **needs a Firebase project + App Check + `GoogleService-Info.plist`**, listed as "needs setup" | yes |
 | Claude Haiku 4.5 / Sonnet 5 / Opus 5 | Foundation Models, Anthropic's official [ClaudeForFoundationModels](https://github.com/anthropics/ClaudeForFoundationModels) 0.2.1 | yes, Anthropic |
 | Claude Haiku 4.5 | direct API: Messages SSE | yes, Anthropic |
-| **Apple on-device**, **default fallback** | Foundation Models, `SystemLanguageModel.default` | **no** |
+| **Apple on-device**, **default primary** | Foundation Models, `SystemLanguageModel.default` | **no** |
 
-- **Default selection (a user decision, 2026-09-25):** Gemini Flash primary, Apple on-device
-  fallback. This departs from the brief's Claude Haiku default because there are no Claude
-  credits yet. Claude stays in the list.
+- **Default selection (a user decision, 2026-09-25, after live latency tests):** Apple on-device
+  primary, Gemini Flash-Lite fallback. This departs from the brief's Claude Haiku default: there
+  are no Claude credits yet, and Gemini's latency is unpredictable (below). Claude stays in the
+  list.
 - **No special-cased fallback** (brief §5.5). The *primary* and the optional *fallback* are two
   settings chosen from the same list, and `ProviderChain` runs them through one code path.
   - A provider is skipped when it can't start (no key, setup missing) or fails before any text.
@@ -242,8 +244,9 @@ protocol:
 - **Measured, Apple on-device:** first words in **1.2–1.5s**, done in **1.3–1.7s**, both headless
   and inside the app. Output: *"Clone the repository using the web URL:
   https://github.com/dejesusbg/monet.git."*
-- **No-text timeout:** `ProviderChain` skips any provider that produces no text within **8s**
-  (a late suggestion is useless) and moves to the next entry. Same rule for every provider.
+- **No-text timeout: 2.5s.** `ProviderChain` skips any provider with no text by then (a late
+  suggestion is useless) and moves to the next entry. Same rule for every provider. On-device
+  fits comfortably: 0.64–1.0s to first text in the app, about 1.2s headless.
 - **Gemini, tested live (2026-09-25):**
   - The key can use `gemini-flash-latest`, `gemini-3.8-flash`, `gemini-3.5-flash`,
     `gemini-flash-lite-latest` and others (`wade-exec-check gemini-models`).
@@ -256,6 +259,19 @@ protocol:
     timeout.
   - In the app, the default chain skipped Gemini and the on-device model wrote the suggestion:
     first text after 9.4s (the 8s timeout plus about 1.3s on-device).
+- **Why Gemini is slow, measured (2026-09-25):** mostly **Google-side queueing**, not the model.
+  - The same tiny prompt ("Say hello in five words") took **0.8s** on one run and **7.6s** on
+    another. The Interactions API reported `total_thought_tokens: 0` on a 9.9s response.
+  - With the real suggestion prompt and `thinkingLevel: minimal`, Flash-Lite answers in
+    **0.8–0.95s** about half the time and is skipped at 2.5s otherwise.
+  - Full Flash models kept returning 503 "high demand".
+- **Interactions API (`/v1beta/interactions`), tried and not adopted:**
+  - Its stream format was learned by probing: `interaction.created` → `step.start{thought}` →
+    `step.delta{thought_signature}` → `step.start{model_output}` → `step.delta{text}`… →
+    `interaction.completed` → `[DONE]`.
+  - On the same prompt it took **5.6–8.8s**, against **0.8–0.9s** for `streamGenerateContent`,
+    even with minimal thinking.
+  - Re-run with `wade-exec-check gemini-raw <path> <body.json>`.
 - **Dev tools:** `swift run wade-exec-check list` shows the catalog and key status;
   `wade-exec-check gemini-models` lists the Flash models the key can call;
   `wade-exec-check <id> [model]` overrides the model; `WADE_DEBUG_SSE=1` prints the raw stream.

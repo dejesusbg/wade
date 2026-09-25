@@ -17,7 +17,7 @@ public enum ProviderChain {
 
     public typealias Resolver = @Sendable (ProviderDescriptor) -> Result<any ExecutionProvider, ExecutionError>
 
-    public static let defaultFirstTokenTimeout: Duration = .seconds(8)
+    public static let defaultFirstTokenTimeout: Duration = .milliseconds(2500)
 
     public static func run(_ chain: [ProviderDescriptor], prompt: ExecutionPrompt,
                            firstTokenTimeout: Duration = defaultFirstTokenTimeout,
@@ -46,8 +46,11 @@ public enum ProviderChain {
                             continuation.yield(.text(delta))
                         }
                     }
+                    let dbg = ProcessInfo.processInfo.environment["WADE_DEBUG_CHAIN"] == "1"
+                    let t0 = ContinuousClock.now
                     let watchdog = Task {
                         try await Task.sleep(for: firstTokenTimeout)
+                        if dbg { FileHandle.standardError.write(Data("[chain] watchdog fired at \(ContinuousClock.now - t0), produced=\(produced.isSet)\n".utf8)) }
                         if !produced.isSet {
                             timedOut.set()
                             attempt.cancel()
@@ -60,6 +63,7 @@ public enum ProviderChain {
                     } catch {
                         failure = error
                     }
+                    if dbg { FileHandle.standardError.write(Data("[chain] attempt ended at \(ContinuousClock.now - t0), failure=\(String(describing: failure))\n".utf8)) }
                     watchdog.cancel()
                     if Task.isCancelled { continuation.finish(throwing: CancellationError()); return }
                     if produced.isSet {

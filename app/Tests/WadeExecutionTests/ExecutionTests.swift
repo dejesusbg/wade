@@ -87,6 +87,8 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
         #expect(r.value(forHTTPHeaderField: "x-goog-api-key") == "AIza-test")
         let body = try JSONSerialization.jsonObject(with: r.httpBody!) as! [String: Any]
         #expect(body["systemInstruction"] != nil && body["contents"] != nil)
+        let thinking = (body["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+        #expect(thinking?["thinkingLevel"] as? String == "minimal")
     }
 }
 
@@ -123,9 +125,10 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
 }
 
 @Suite struct CatalogTests {
-    @Test func defaultsAreGeminiPrimaryAndOnDeviceFallback() {
-        #expect(ProviderCatalog.find(ProviderCatalog.defaultPrimaryID)?.vendor == .google)
-        #expect(ProviderCatalog.find(ProviderCatalog.defaultFallbackID)?.vendor == .apple)
+    @Test func defaultsAreOnDevicePrimaryAndGeminiLiteFallback() {
+        #expect(ProviderCatalog.find(ProviderCatalog.defaultPrimaryID)?.vendor == .apple)
+        #expect(ProviderCatalog.find(ProviderCatalog.defaultFallbackID)?.id == "google.gemini-flash-lite.direct")
+        #expect(ProviderChain.defaultFirstTokenTimeout == .milliseconds(2500))
     }
 
     @Test func everyEntryResolvesOrExplainsWhyNot() {

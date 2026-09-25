@@ -90,11 +90,13 @@ public enum ProviderCatalog {
                            model: "system", title: "Apple on-device model (private, offline)", setupRequired: nil),
     ]
 
-    /// Defaults (a user decision, 2026-09-25): Gemini Flash primary, since there are no Claude
-    /// credits yet, departing from the brief's Claude Haiku default; Apple on-device as fallback.
-    /// Both are ordinary settings, changeable in Settings → Suggestions.
-    public static let defaultPrimaryID = "google.gemini-flash.direct"
-    public static let defaultFallbackID: String? = "apple.on-device"
+    /// Defaults (user decision, 2026-09-25, after live latency tests): Apple on-device primary,
+    /// about 1.2–1.5s to first text and private; Gemini Flash-Lite fallback. This departs from
+    /// the brief's Claude Haiku default: no Claude credits yet, and Gemini's latency was
+    /// dominated by unpredictable server-side queueing (0.8s to more than 10s, frequent 503s on
+    /// full Flash). Both are ordinary settings, changeable in Settings → Suggestions.
+    public static let defaultPrimaryID = "apple.on-device"
+    public static let defaultFallbackID: String? = "google.gemini-flash-lite.direct"
 
     public static func find(_ id: String?) -> ProviderDescriptor? {
         all.first { $0.id == id }
