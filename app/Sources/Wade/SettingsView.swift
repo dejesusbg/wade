@@ -4,6 +4,7 @@ import SwiftUI
 struct SettingsView: View {
     let permission: AccessibilityPermission
     let memory: MemoryModel
+    let execution: ExecutionEngine
 
     var body: some View {
         TabView {
@@ -42,6 +43,9 @@ struct SettingsView: View {
                     }
                 }
                 .formStyle(.grouped)
+            }
+            Tab("Suggestions", systemImage: "text.bubble") {
+                ExecutionSettingsView(engine: execution)
             }
             Tab("Permissions", systemImage: "lock.shield") {
                 Form {

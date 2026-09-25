@@ -15,6 +15,13 @@ public struct OnboardingFact: Identifiable, Sendable, Equatable {
     public var text: String
     public let createdAt: Date
     public var updatedAt: Date
+
+    public init(id: Int64, text: String, createdAt: Date, updatedAt: Date) {
+        self.id = id
+        self.text = text
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }
 
 public struct CorrectionFact: Identifiable, Sendable, Equatable {
@@ -28,6 +35,16 @@ public struct CorrectionFact: Identifiable, Sendable, Equatable {
     /// Always "user_correction" in v1; kept so later versions can weight sources differently.
     public let provenance: String
     public let createdAt: Date
+
+    public init(id: Int64, suggestionId: String, suggestion: String, correction: String,
+                provenance: String, createdAt: Date) {
+        self.id = id
+        self.suggestionId = suggestionId
+        self.suggestion = suggestion
+        self.correction = correction
+        self.provenance = provenance
+        self.createdAt = createdAt
+    }
 }
 
 public final class MemoryStore {

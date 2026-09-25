@@ -83,6 +83,20 @@ public struct TriggerFired: Codable, Sendable, Equatable {
     public var mode: String?
     /// The Stage 1 moment that led here: stuck, selection, settled.
     public var kind: String?
+    /// What was on screen (app, title, url, excerpt, selection, error_text), for the execution stage.
+    public var context: [String: String]?
+
+    public init(suggestionId: String, gateScore: Double, jspaceConcepts: [String], tkgDigest: String,
+                timestamp: Double, mode: String? = nil, kind: String? = nil, context: [String: String]? = nil) {
+        self.suggestionId = suggestionId
+        self.gateScore = gateScore
+        self.jspaceConcepts = jspaceConcepts
+        self.tkgDigest = tkgDigest
+        self.timestamp = timestamp
+        self.mode = mode
+        self.kind = kind
+        self.context = context
+    }
 }
 
 /// Liveness check only; not part of the trigger protocol proper.

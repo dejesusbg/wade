@@ -75,9 +75,11 @@ def trigger_fired(
     timestamp: float,
     mode: str | None = None,
     kind: str | None = None,
+    context: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """`mode` (the winning anchor family, e.g. "coding") and `kind` (the Stage 1 moment) extend
-    the brief's shape; the app ignores fields it doesn't know."""
+    """`mode` (the winning anchor family, e.g. "coding"), `kind` (the Stage 1 moment) and `context`
+    (app, title, url, excerpt, selection, error_text: what the execution stage needs to write a
+    concrete suggestion) extend the brief's shape; the app ignores fields it doesn't know."""
     message = {
         "type": "trigger_fired",
         "suggestion_id": suggestion_id,
@@ -90,4 +92,6 @@ def trigger_fired(
         message["mode"] = mode
     if kind:
         message["kind"] = kind
+    if context:
+        message["context"] = context
     return message

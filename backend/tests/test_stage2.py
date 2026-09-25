@@ -113,8 +113,10 @@ def test_prompt_has_context_and_digest_and_skips_missing_fields():
 
 def test_trigger_fired_carries_mode_and_kind():
     m = protocol.trigger_fired(suggestion_id="s", gate_score=0.0, jspace_concepts=["clone"],
-                               tkg_digest="d", timestamp=1.0, mode="coding", kind="settled")
+                               tkg_digest="d", timestamp=1.0, mode="coding", kind="settled",
+                               context={"url": "https://github.com/a/b"})
     assert m["mode"] == "coding" and m["kind"] == "settled" and m["type"] == "trigger_fired"
+    assert m["context"] == {"url": "https://github.com/a/b"}
     assert "mode" not in protocol.trigger_fired(suggestion_id="s", gate_score=0.0, jspace_concepts=[],
                                                 tkg_digest="d", timestamp=1.0)
 

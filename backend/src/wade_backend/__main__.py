@@ -49,6 +49,7 @@ def main() -> None:
             timestamp=time.time(),
             mode=result.mode,
             kind=check.kind,
+            context=check.context,
         )
         loop = loop_ref["loop"]
         loop.call_soon_threadsafe(lambda: loop.create_task(server.broadcast(message)))

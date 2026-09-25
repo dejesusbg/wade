@@ -70,7 +70,7 @@ struct OnboardingView: View {
                 Label("When you step away and come back", systemImage: "moon.zzz")
             }
             .padding(.leading, 4)
-            Text("Password fields and text boxes are never read. Everything stays on this Mac. You can revoke access anytime in System Settings.")
+            Text("Password fields and text boxes are never read. Everything stays on this Mac, unless you later add a Claude API key for writing suggestions (Settings → Suggestions explains what that sends). You can revoke access anytime in System Settings.")
                 .font(.callout).foregroundStyle(.secondary)
 
             if permission.isTrusted {

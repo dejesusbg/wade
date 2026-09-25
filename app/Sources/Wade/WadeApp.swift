@@ -20,8 +20,14 @@ struct WadeApp: App {
         .windowResizability(.contentSize)
         .defaultLaunchBehavior(model.memory.onboardingCompleted ? .suppressed : .presented)
 
+        Window("Wade Suggestion", id: "suggestion") {
+            SuggestionView(engine: model.execution)
+        }
+        .windowResizability(.contentSize)
+        .defaultLaunchBehavior(.suppressed)
+
         Settings {
-            SettingsView(permission: model.permission, memory: model.memory)
+            SettingsView(permission: model.permission, memory: model.memory, execution: model.execution)
         }
     }
 }
@@ -31,6 +37,7 @@ struct WadeApp: App {
 final class AppModel {
     let permission = AccessibilityPermission()
     let memory = MemoryModel()
+    @ObservationIgnored private(set) lazy var execution = ExecutionEngine(memory: memory)
     private(set) var backendState = BackendClient.State.disconnected
     private(set) var lastTrigger: TriggerFired?
     private(set) var eventCount = 0
@@ -48,10 +55,18 @@ final class AppModel {
         }
         Task { [client] in
             for await message in client.messages {
-                if case .triggerFired(let trigger) = message { self.lastTrigger = trigger }
+                if case .triggerFired(let trigger) = message {
+                    self.lastTrigger = trigger
+                    self.execution.run(trigger)  // Phase 4: write the suggestion (shown in Phase 6)
+                }
             }
         }
         syncObserver()
+        // Developer hook: `open Wade.app --args --sample-suggestion` runs the sample trigger
+        // through the real execution engine (same as the menu's "Try a Sample Suggestion").
+        if CommandLine.arguments.contains("--sample-suggestion") {
+            Task { @MainActor [weak self] in self?.execution.runSample() }
+        }
     }
 
     /// Observe only with consent (onboarding done) and permission (AX trusted). Re-evaluated
@@ -99,6 +114,12 @@ struct MenuContent: View {
                 // Placeholder until the Phase 6 popover: shows Stage 2 fires as they arrive.
                 Text("wade is \(t.mode ?? "thinking")… · \(t.jspaceConcepts.prefix(3).joined(separator: ", "))")
             }
+        }
+        Divider()
+        Button("Show Suggestion…") { openWindow(id: "suggestion") }
+        Button("Try a Sample Suggestion") {
+            openWindow(id: "suggestion")
+            model.execution.runSample()
         }
         Divider()
         Button(model.memory.onboardingCompleted ? "Setup…" : "Finish Setup…") {

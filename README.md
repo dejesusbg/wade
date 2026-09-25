@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 3 (Stage 2 J-lens) done, check-in pending before Phase 4
+## Status: Phase 4 (execution layer) in progress: Claude route awaiting an API key to test
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -200,6 +200,47 @@ uv run wade-stage2 eval -v              # synthetic scenarios → Stage 2 → mo
   the first 120.
 - **Latency target** (brief §10): p95 ≤ 1s per Stage 2 check on the M5. Measured: median
   369ms, p95 ~380ms with J = I; about 465ms with a learned J at all layers.
+
+### Execution: writing the suggestion (Phase 4)
+
+`app/Sources/WadeExecution/` implements the `ExecutionProvider` protocol (brief §5.5): one
+interface, interchangeable implementations. Each yields **text deltas** through an
+`AsyncThrowingStream`. It throws rather than using the brief's `AsyncStream`, so key, rate-limit
+and network errors reach the UI.
+
+| Provider | Route | Leaves the Mac? |
+|---|---|---|
+| **Claude Haiku 4.5** (default, per brief) | `AFMProvider`: `LanguageModelSession` + Anthropic's official [ClaudeForFoundationModels](https://github.com/anthropics/ClaudeForFoundationModels) 0.2.1 (`ClaudeModel.haiku4_5`) | yes, to Anthropic's API |
+| Claude Sonnet 5 / Opus 5 (opt-in, stronger) | same | yes |
+| Claude Haiku 4.5, direct API (fallback route) | `DirectAPIProvider`: `POST /v1/messages`, SSE, no SDK | yes |
+| Apple on-device model | `AFMProvider`: `SystemLanguageModel.default` | **no** |
+
+- **No key, no cloud.** A Claude choice without an API key falls back to the on-device model,
+  so nothing leaves the Mac until you add a key in Settings → Suggestions. The key lives in the
+  **Keychain**. `.apiKey` is the package's development mode; shipping would use `.appAttest`
+  (no key in the app, no backend) or `.proxied`.
+- **Prompt** (`ExecutionPrompt`):
+  - The instructions are stable and cache-friendly.
+  - The message carries the mode, the J-space concepts, the digest, the screen context
+    (`trigger_fired` now includes `context`), your onboarding facts and your last corrections.
+  - At most two sentences, starting with the action. The model may answer exactly `NOTHING`,
+    and then the suggestion is dropped: a second anti-Clippy guard.
+- **Surface:** a placeholder "Wade Suggestion" window streams text live (menu → Show / Try a
+  Sample Suggestion). Phase 6 replaces it with the menu-bar popover.
+- **Measured, on-device model:** first words in **1.2–1.5s**, done in **1.3–1.7s** (sample
+  "repo page" trigger, both headless and inside the app). The headless check produced *"Clone the
+  repository using the web URL: https://github.com/dejesusbg/monet.git."*
+- **End to end in the app:** a synthetic stuck scenario went through Stage 1, then a Stage 2
+  FIRE ("fixing", 443ms), then `trigger_fired`, then the engine. This surfaced a Swift
+  exclusivity crash (reading and writing `current` in one expression), since fixed.
+- **Dev tools:** `swift run wade-exec-check [on-device|haiku|haiku-direct|sonnet]` streams the
+  sample through one provider. For Claude it takes the key from `$ANTHROPIC_API_KEY` or the
+  Keychain. `open build/Wade.app --args --sample-suggestion` runs it inside the app.
+- **§5.6 spike answer, for Phase 5:** ClaudeForFoundationModels exposes only server tools (web
+  search, fetch, code execution), **not** the Messages API's remote MCP connector
+  (`mcp_servers`). So MCP through the AFM route means the framework's client-side `Tool`
+  protocol. `DirectAPIProvider` could use the connector (`mcp_servers` + an `mcp_toolset` tool,
+  beta `mcp-client-2025-11-20`).
 
 ### What the app observes
 
