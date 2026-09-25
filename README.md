@@ -14,7 +14,25 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 5 (MCP tool layer): tool path works; a real Stage 2 trigger hasn't fired live yet (see Phase 5 notes)
+## Status: Phase 5 done (2026-09-25, with one item open); Phase 6 (menu bar suggestion UI) in progress
+
+### Open items carried forward
+
+Deferred on purpose, so the phases stay in order. Each names the phase that owns it.
+
+- **Phase 5 goal, real-trigger part (open).** No real Stage 2 fire has yet carried through to a
+  completed action. The tool path is verified with a made-up trigger (in-app **Do it** wrote a
+  note). The live run (11 real checks, 0 fires) is in the Phase 5 notes. Close this once
+  Phase 7 calibration makes opportunity moments fire.
+- **Phase 7: Stage 2 calibration.** On real pages and selections, "nothing" always matches or
+  beats every action family. Calibrate the threshold and null-family margin against the
+  evaluation harness, with held-out scenarios, not against a handful of live examples.
+- **Phase 7: fair J = I vs learned J-lens comparison.** Same scenarios, same thresholds,
+  latency included. See the overnight learned-J notes (Phase 3). The 120-prompt checkpoint is
+  archived at `~/Library/Application Support/Wade/jlens-learned-120prompts.checkpoint.npz`.
+- **Small Phase 5 bugs:**
+  - The on-device text said "Clone" while its button would fork.
+  - `list_releases` failed once, with the cause not captured. `github-e2e` now logs arguments.
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
