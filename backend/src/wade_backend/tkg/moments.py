@@ -113,11 +113,16 @@ class MomentDetector:
     def _check(self, g: TemporalGraph, f: Features, kind: str, reasons: tuple[str, ...],
                surface: bool = True, score: float | None = None) -> CheckRequest:
         self.check_times.append(g.now)
-        return CheckRequest(kind, g.now, reasons, digest.render(g, f), build_context(g), surface, score)
+        return CheckRequest(kind, g.now, reasons, digest.render(g, f), build_context(g, kind), surface, score)
 
 
-def build_context(g: TemporalGraph) -> dict[str, str]:
-    """Current screen context for Stage 2. Text stays local; it's never put in the digest."""
+def build_context(g: TemporalGraph, kind: str = "settled") -> dict[str, str]:
+    """Current screen context for Stage 2. Text stays local; it's never put in the digest.
+
+    Selections and error text belong to the app in front. The exception is a *stuck* check:
+    there the error is often in the app the user just left (reading Safari about an Xcode
+    error), so the latest error from any app counts. Otherwise a probe's error dialog stayed
+    attached to an unrelated shopping page (live run, 2026-09-25)."""
     ctx: dict[str, str] = {}
     focus = g.current_focus()
     if focus:
@@ -127,10 +132,12 @@ def build_context(g: TemporalGraph) -> dict[str, str]:
             ctx["url"] = focus.url
         if focus.excerpt:
             ctx["excerpt"] = focus.excerpt
-    selections = [s for s in g.actions("selection") if g.now - s.ts <= 120]
+    here = focus.app_bundle_id if focus else None
+    selections = [s for s in g.actions("selection") if g.now - s.ts <= 120 and s.app_context == here]
     if selections:
         ctx["selection"] = str(selections[-1].metadata.get("text", ""))
-    errors = [e for e in g.errors() if g.now - e.ts <= 300 and e.text]
+    errors = [e for e in g.errors() if g.now - e.ts <= 300 and e.text
+              and (kind == "stuck" or e.app_bundle_id == here)]
     if errors:
         ctx["error_text"] = errors[-1].text
     return ctx

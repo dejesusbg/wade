@@ -14,16 +14,15 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 7 (evaluation harness) in progress: calibrated, live real-trigger run pending
+## Status: Phase 7 done (2026-09-25): v1 definition of done met (see below); next steps are listed at the end of the Phase 7 notes
 
 ### Open items carried forward
 
 Deferred on purpose, so the phases stay in order. Each names the phase that owns it.
 
-- **Phase 5 goal, real-trigger part (open).** No real Stage 2 fire has yet carried through to a
-  completed action. The tool path is verified with a made-up trigger (in-app **Do it** wrote a
-  note). The first live run (11 real checks, 0 fires) is in the Phase 5 notes. The live run
-  with the Phase 7 calibration is pending.
+- **Phase 5 goal, real-trigger part: closed 2026-09-25.** A real moment (an apple.com phone
+  comparison page) led to a Stage 2 fire, a suggestion, **Do it**, and a note written by the
+  filesystem MCP server. See "Live run with the calibration" below.
 - **Done in Phase 7 (details below):**
   - Stage 2 calibration against a labeled, family-split evaluation set.
   - The fair J = I vs learned J-lens comparison.
@@ -43,7 +42,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (49) and `cd backend && uv run pytest` (75).
+Tests: `cd app && swift test` (49) and `cd backend && uv run pytest` (77).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar icon:
@@ -536,6 +535,37 @@ uv run wade-eval verdicts                               # real use: research log
   way).
 - Tests assert that a check full of a made-up secret logs none of it.
 
+**Live run with the calibration (2026-09-25, research logs on):**
+
+| # | moment | Stage 2 | why |
+|---|---|---|---|
+| 1 | lock screen, settled (before the lock-screen fix) | quiet | "nothing, none, pause" |
+| 2–3 | Frontiers paper: a selection, then settled 27s | quiet ×2 | "summarize, highlight" |
+| 4 | this terminal, settled | quiet | "prompt, share" |
+| 5 | arXiv abstract, settled | quiet | "summarize" |
+| 6 | dialog probe ×2 → **stuck 0.73** (3rd repeat + ping-pong) | quiet | "wait, pause, stay, quiet". The dialog says "simulated error, nothing is wrong", so arguably right |
+| 7 | **apple.com "iPhone Duo vs iPhone 17 Pro", settled 15s** | **FIRE comparing, 664ms** | "compare 0.027" |
+| 8 | Finder selection | quiet | "share, navigate" |
+
+- **#7 went end to end:**
+  - The popover opened by itself.
+  - Gemini Flash-Lite wrote the suggestion in 5.1s (the on-device model missed the 2.5s window).
+  - It proposed `save_note`, and you clicked **Do it**.
+  - The note `~/Documents/Wade/2026-09-25 153408 Apple iPhone Comparison.md` holds a titled
+    link to the page.
+  - The verdict log recorded `shown_auto → composed → accepted → action_done`, and
+    `wade-eval verdicts` reported 8 checks, 1 fire (12%), median 676ms, welcome rate 1/1.
+- **Finding, the evaluation set vs what Wade sees:** the hand-written paper cases fired
+  "researching" because their excerpts included the page chrome ("Cite as · Download PDF").
+  Real snapshots read the **main content** (the abstract), where the lens reads "summarize",
+  not "save". So the evaluation set is closer to ideal pages than to real captures. Future
+  cases should be written from what the observer actually captures, and the research log is
+  the real test.
+- **Finding, a context leak (fixed):** the probe's error text rode along on the apple.com
+  page. Selections and error text now belong to the app in front. The one exception is error
+  text on stuck checks, where the error is often in the app just left. The calibration wasn't
+  re-run for this change: it only touches the pipeline scenarios' contexts, not the 80 cases.
+
 **Also fixed in Phase 7:**
 - **Text vs button.** The on-device model's text now names the proposed action: "Fork
   repository …" in 7 of 7 runs, from 0 of 5. The tool result spells out the exact action the
@@ -545,6 +575,33 @@ uv run wade-eval verdicts                               # real use: research log
   title in the same minute overwrote each other.
 - **Lock screen.** The observer ignores it (`loginwindow`, screen saver): a locked Mac was
   producing "settled" checks.
+
+### Definition of done for v1 (brief §10), checked 2026-09-25
+
+| requirement | status |
+|---|---|
+| The TKG gate fires / stays quiet correctly on the synthetic scenarios | ✅ `uv run pytest` (77), incl. moment, budget and "Stage 1 can't reach the user" tests |
+| Stage 2 runs on-device within a measured latency target | ✅ target p95 ≤ 1s; deployed median 465ms, p95 555ms (94 checks); live median 676ms |
+| At least one MCP-backed suggestion executes from a real trigger to a completed action | ✅ live run #7: comparison page → Stage 2 → popover → Do it → note written by the filesystem MCP server |
+| Onboarding facts viewable/editable; correction facts accumulate from real interactions | ✅ Settings → About You / Corrections; Phase 6 run stored a `user_rejection` and a `user_correction` |
+| All wired through the menu-bar UI, no cursor-following | ✅ NSStatusItem popover; no cursor-follow code anywhere |
+
+**Honest limits, carried into v2:**
+- Stage 2's precision is measured on 36 held-out hand-written cases (91% [62–98%]) and one
+  short live session. Its recall on opportunities is low: text selections and paper pages
+  don't fire.
+- The evaluation set's excerpts are more idealized than real captures (see Phase 7).
+- The research log (opt-in) is the way to get real numbers. Collect verdicts in real use,
+  then recalibrate with `wade-eval` on fresh data. Don't recalibrate on the held-out set
+  again: it has been looked at.
+- Candidate next steps, each to be measured, not assumed:
+  - write cases from real captures
+  - add calibration-only anchor words the learned lens reads ("resolve", "allow",
+    "troubleshoot")
+  - make selections fire: "summarize" is already a writing word, but it also shows up on quiet
+    reading pages, so that family's baseline is high and a selection's z stays around 2
+  - an 8B model (§5.4's upgrade path)
+  - selection-specific prompting
 
 ### What the app observes
 

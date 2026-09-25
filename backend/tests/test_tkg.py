@@ -171,6 +171,26 @@ def test_context_carries_screen_content_and_digest_does_not():
     assert "secret-ish" not in c.digest and "/dejesusbg/monet" not in c.digest
 
 
+def test_other_apps_error_and_selection_dont_leak_into_a_settled_context():
+    """Live run 2026-09-25: a test app's error dialog rode along on an unrelated shopping page."""
+    s = Session().focus(XCODE, "Build").error("sig", "Build Failed: something").select("a paragraph selected in Xcode here")
+    s.wait(3).focus(CHROME, "Compare phones").snapshot("https://apple.com/compare", "iPhone vs iPhone").wait(20)
+    _, _, checks = run(s)
+    c = next(c for c in checks if c.kind == "settled" and c.context.get("app") == "Chrome")
+    assert "error_text" not in c.context and "selection" not in c.context
+
+
+def test_stuck_context_keeps_the_error_from_the_app_just_left():
+    from wade_backend.tkg.moments import build_context
+
+    s = Session().focus(XCODE, "Build").error("sig", "Build Failed: cannot find X").wait(2).focus(SAFARI, "search")
+    stage1 = Stage1()
+    stage1.replay(s.events, until=s.t)
+    g = stage1.graph
+    assert build_context(g, "stuck")["error_text"].startswith("Build Failed")
+    assert "error_text" not in build_context(g, "settled")
+
+
 def test_stage1_never_sends_trigger_fired():
     """Stage 1 can't reach the user: nothing it does produces a message to the app."""
     async def scenario():
