@@ -17,7 +17,7 @@ public enum ProviderChain {
 
     public typealias Resolver = @Sendable (ProviderDescriptor) -> Result<any ExecutionProvider, ExecutionError>
 
-    public static let defaultFirstTokenTimeout: Duration = .milliseconds(2500)
+    public static let defaultFirstTokenTimeout: Duration = .seconds(5)  // user decision, 2026-09-25 (was 2.5s)
 
     public static func run(_ chain: [ProviderDescriptor], prompt: ExecutionPrompt,
                            tools: ToolBox = .none,

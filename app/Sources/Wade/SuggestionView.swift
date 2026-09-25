@@ -137,7 +137,15 @@ private struct ProposalRow: View {
             }
             Spacer()
             switch proposal.state {
-            case .pending: Button("Do it", action: perform).buttonStyle(.borderedProminent)
+            case .pending:
+                Button(action: perform) {
+                    HStack(spacing: 4) {
+                        Text("Do it")
+                        Text(AcceptHotKey.display).font(.caption).opacity(0.75)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Runs this action. Shortcut: \(AcceptHotKey.display), while this popover is showing.")
             case .running: ProgressView().controlSize(.small)
             case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)

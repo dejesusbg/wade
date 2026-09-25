@@ -144,3 +144,15 @@ def test_explanation_puts_family_concepts_first():
 
     assert explanation_order([("prompt", 0.024), ("explain", 0.018), ("fix", 0.014), ("念头", 0.012)]) == \
         ["explain", "fix", "prompt", "念头"]
+
+
+def test_pid_alive():
+    import os
+    import subprocess
+
+    from wade_backend.__main__ import pid_alive
+
+    assert pid_alive(os.getpid())
+    p = subprocess.Popen(["true"])
+    p.wait()
+    assert not pid_alive(p.pid)

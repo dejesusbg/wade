@@ -13,6 +13,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private var shownSuggestionID: String?  // the suggestion the popover last opened for, by itself or by click
     private var autoCloseTask: Task<Void, Never>?
+    private lazy var hotKey = AcceptHotKey { [weak self] in self?.acceptWithHotKey() }
     /// An auto-opened popover closes after this long untouched; the icon keeps showing the suggestion.
     static let autoCloseAfter: Duration = .seconds(20)
 
@@ -50,6 +51,19 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
         item.button?.image = NSImage(systemSymbolName: icon.symbolName, accessibilityDescription: "Wade")
         if autoOpen, let id { show(for: id, automatically: true) }
+        updateHotKey()
+    }
+
+    /// ⌥Space is live only while the popover shows an action waiting for "Do it".
+    private func updateHotKey() {
+        let pending = model.execution.current?.proposals.contains { $0.state == .pending } ?? false
+        hotKey.setActive(popover.isShown && pending)
+    }
+
+    private func acceptWithHotKey() {
+        guard popover.isShown, let p = model.execution.current?.proposals.first(where: { $0.state == .pending }) else { return }
+        userEngaged()
+        model.execution.perform(p.id)
     }
 
     @objc private func togglePopover() {
@@ -71,6 +85,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         if id != nil { model.execution.note(automatically ? .shownAuto : .opened) }
         autoCloseTask?.cancel()
         if automatically { scheduleAutoClose() }
+        updateHotKey()
     }
 
     private func scheduleAutoClose() {
@@ -100,6 +115,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         autoCloseTask?.cancel()
+        updateHotKey()
     }
 }
 

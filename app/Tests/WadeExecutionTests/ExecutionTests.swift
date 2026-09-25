@@ -131,7 +131,7 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
     @Test func defaultsAreOnDevicePrimaryAndGeminiLiteFallback() {
         #expect(ProviderCatalog.find(ProviderCatalog.defaultPrimaryID)?.vendor == .apple)
         #expect(ProviderCatalog.find(ProviderCatalog.defaultFallbackID)?.id == "google.gemini-flash-lite.direct")
-        #expect(ProviderChain.defaultFirstTokenTimeout == .milliseconds(2500))
+        #expect(ProviderChain.defaultFirstTokenTimeout == .seconds(5))
     }
 
     @Test func everyEntryResolvesOrExplainsWhyNot() {

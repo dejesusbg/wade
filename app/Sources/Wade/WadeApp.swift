@@ -45,6 +45,7 @@ final class AppModel {
     private(set) var lastEvent: TKGEvent?
 
     private let client = BackendClient()
+    let backend = BackendLauncher()
     @ObservationIgnored private lazy var observer = ActivityObserver { [weak self] event in
         self?.forward(event)
     }
@@ -52,7 +53,17 @@ final class AppModel {
     init() {
         client.start()
         Task { [client] in
-            for await state in client.states { self.backendState = state }
+            for await state in client.states {
+                self.backendState = state
+                if state == .connected { self.backend.connected() }
+            }
+        }
+        // Give an already-running backend (started by hand) a moment to accept the connection;
+        // otherwise start one. It stops when Wade quits.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let self else { return }
+            self.backend.startIfNeeded(alreadyConnected: self.backendState == .connected)
         }
         Task { [client] in
             for await message in client.messages {
@@ -66,7 +77,10 @@ final class AppModel {
         _ = integrations  // start the opted-in MCP servers
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.integrations.stop() }
+            MainActor.assumeIsolated {
+                self?.integrations.stop()
+                self?.backend.stop()
+            }
         }
         // Developer hooks: `open Wade.app --args --sample-suggestion` (or `--sample-note`) runs a
         // sample trigger through the real execution engine, like the popover's "Try a Sample…".
@@ -105,7 +119,13 @@ final class AppModel {
 
     /// One line for the popover's footer.
     var statusLine: String {
-        if !backendConnected { return "Backend not running" }
+        if !backendConnected {
+            switch backend.state {
+            case .starting: return "Starting the backend…"
+            case .failed(let why): return "Backend: \(why)"
+            default: return "Backend not running"
+            }
+        }
         if !memory.onboardingCompleted { return "Setup not finished" }
         if !permission.isTrusted { return "Accessibility access needed" }
         return "Watching for moments · \(eventCount) events sent"

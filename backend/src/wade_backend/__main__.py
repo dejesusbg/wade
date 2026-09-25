@@ -18,6 +18,18 @@ from .tkg import CheckRequest, Stage1
 log = logging.getLogger("wade_backend")
 
 
+def pid_alive(pid: int) -> bool:
+    import os
+
+    try:
+        os.kill(pid, 0)  # signal 0: existence check only
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    return True
+
+
 def explanation_order(concepts: list[tuple[str, float]]) -> list[str]:
     """J-space concepts for the "why" line: anchor-family words first (the ones that explain
     the decision), then the rest by weight. Task-framing tokens that sit on every check
@@ -35,6 +47,8 @@ def main() -> None:
                         help="append every raw tkg_event to FILE as JSON lines (includes window titles; off by default)")
     parser.add_argument("--eval-log", type=Path, nargs="?", const=EVAL_LOG_PATH, default=None, metavar="FILE",
                         help=f"append every check and Stage 2 decision to FILE (no screen text; default {EVAL_LOG_PATH})")
+    parser.add_argument("--exit-with-pid", type=int, default=None, metavar="PID",
+                        help="exit when process PID is gone (the app passes its own PID when it starts the backend)")
     parser.add_argument("-v", "--verbose", action="store_true", help="log every event and gate score")
     parser.add_argument("--stage1-only", action="store_true", help="don't load the Stage 2 model")
     args = parser.parse_args()
@@ -123,15 +137,27 @@ def main() -> None:
                 stage1.tick(time.time())
                 await asyncio.sleep(1)
 
+        async def watch_parent(pid: int) -> None:
+            # The app may be killed or crash without a chance to stop us: don't outlive it.
+            while True:
+                await asyncio.sleep(2)
+                if not pid_alive(pid):
+                    log.info("app (pid %d) is gone; shutting down", pid)
+                    stop.set()
+                    return
+
         await server.start()
         serve = asyncio.create_task(server.serve_forever())
         ticks = asyncio.create_task(ticker())
+        watcher = asyncio.create_task(watch_parent(args.exit_with_pid)) if args.exit_with_pid else None
         try:
             await stop.wait()
             log.info("shutting down")
         finally:
             ticks.cancel()
             serve.cancel()
+            if watcher:
+                watcher.cancel()
             if runner:
                 runner.close()
             await server.close()
