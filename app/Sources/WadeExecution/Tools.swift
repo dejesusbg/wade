@@ -61,6 +61,7 @@ public enum ExecutionEvent: Sendable, Equatable {
     case text(String)
     case toolRan(name: String, ok: Bool)
     case proposed(ProposedAction)
+    case refused(name: String, reason: String)  // a proposal Wade's check turned down
 }
 
 /// The tools for one suggestion, and how calls to them are handled. Shared by every provider,
@@ -69,10 +70,16 @@ public struct ToolBox: Sendable {
     public let tools: [MCPTool]
     public let runner: (any ToolRunner)?
     public let onEvent: @Sendable (ExecutionEvent) -> Void
+    /// Checks a proposal before it's shown; returns why it must not be offered, or nil. The
+    /// reason goes back to the model so it can retry or offer nothing (e.g. `Grounding`).
+    public let validate: (@Sendable (MCPTool, String) -> String?)?
 
-    public init(tools: [MCPTool], runner: (any ToolRunner)?, onEvent: @escaping @Sendable (ExecutionEvent) -> Void) {
+    public init(tools: [MCPTool], runner: (any ToolRunner)?,
+                validate: (@Sendable (MCPTool, String) -> String?)? = nil,
+                onEvent: @escaping @Sendable (ExecutionEvent) -> Void) {
         self.tools = tools
         self.runner = runner
+        self.validate = validate
         self.onEvent = onEvent
     }
 
@@ -85,6 +92,10 @@ public struct ToolBox: Sendable {
     public func handle(_ name: String, argumentsJSON: String) async -> String {
         guard let tool = tool(named: name) else { return "Error: unknown tool \(name)." }
         if !tool.readOnly {
+            if let problem = validate?(tool, argumentsJSON) {
+                onEvent(.refused(name: name, reason: problem))
+                return "Not proposed: \(problem)"
+            }
             onEvent(.proposed(ProposedAction(tool: tool, argumentsJSON: argumentsJSON)))
             // Name the exact action: small models otherwise describe a neighbouring one (e.g. the
             // text said "clone" while the button forked, 5 of 5 runs).

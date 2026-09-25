@@ -42,7 +42,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (49) and `cd backend && uv run pytest` (77).
+Tests: `cd app && swift test` (56) and `cd backend && uv run pytest` (77).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar icon:
@@ -566,6 +566,29 @@ uv run wade-eval verdicts                               # real use: research log
   text on stuck checks, where the error is often in the app just left. The calibration wasn't
   re-run for this change: it only touches the pipeline scenarios' contexts, not the 80 cases.
 
+**Notes that hold something (fixed after the live run):**
+- **The problem:** the live note held only the page's link. In headless tests, a page showing
+  only its title led the on-device model to **invent** content in 3 of 3 runs: made-up specs
+  ("Snapdragon 8 Gen 3, 128 GB"), vague claims ("higher specs, faster processing"), or links
+  padded with the title.
+- **The fix, part 1:** `save_note` now asks for the substance (the passage, or one line per
+  difference for a comparison, then `Source: <URL>`) and "only facts shown on screen".
+- **The fix, part 2:** Wade checks every note before offering it (`Grounding`, in
+  WadeExecution, deterministic):
+  - Every number must appear on screen.
+  - At most 30% of its content words (matched by word stem) may be missing from the screen.
+  - At least 3 words must come from the page text itself, not the title.
+  - A note that's only a link (Markdown links removed) is refused.
+- **What a refusal does:** the note isn't proposed, and the model is told why. If a
+  suggestion's only action was refused, the suggestion is dropped, like `NOTHING`, since
+  there'd be nothing to click.
+- **Measured, on-device, 11 runs:**
+  - title-only page: **5 of 5 refused**, where before they were link-only or invented notes
+  - rich comparison: **3 of 3** difference lists, where before they were a flat copy or a URL
+    line
+  - selection: **3 of 3** written, quoted or faithfully paraphrased
+- **Unit tests** use those real good and bad notes as fixtures.
+
 **Also fixed in Phase 7:**
 - **Text vs button.** The on-device model's text now names the proposed action: "Fork
   repository …" in 7 of 7 runs, from 0 of 5. The tool result spells out the exact action the
@@ -666,6 +689,11 @@ certificate-based requirement.
 `scripts/dialog-probe.sh` pops up two clearly labeled *fake* error alerts for about 11s. With
 Wade running, expect exactly two `error_dialog` events from `com.wade.dialog-probe` with
 equal signatures.
+- `--refocus` also switches to Finder and back while the first alert is open. That's the
+  Phase 2 check that a refocused dialog isn't counted twice. It's off by default, since the
+  Finder hop adds app switching that nudges the stuck score.
+- Two runs within a few minutes give 3+ repeats, which is a stuck check. Stage 2 then
+  usually stays quiet, because the alert says nothing is wrong.
 
 ### Memory stores (§5.7)
 

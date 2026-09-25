@@ -39,7 +39,7 @@ public enum ProviderChain {
                     let produced = Flag()
                     let progressed = Flag()  // tool activity: progress for the watchdog, not "text shown"
                     let timedOut = Flag()
-                    let attemptTools = ToolBox(tools: tools.tools, runner: tools.runner) { event in
+                    let attemptTools = ToolBox(tools: tools.tools, runner: tools.runner, validate: tools.validate) { event in
                         progressed.set()
                         tools.onEvent(event)
                     }

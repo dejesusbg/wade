@@ -12,15 +12,20 @@ public enum ComposedTools {
     public static func saveNote() -> MCPTool {
         MCPTool(
             name: saveNoteName,
-            description: "Save text to the user's notes as a Markdown note. Use it to offer keeping a selected passage, a quote, or a summary.",
+            description: "Save useful text to the user's notes as a Markdown note: a selected passage or quote, the key facts on screen, or, for a comparison, the main differences. A link alone is not a note: if nothing on screen is worth keeping, don't offer this.",
             inputSchema: #"""
             {"type":"object","properties":{
               "title":{"type":"string","description":"Short note title, a few words"},
-              "content":{"type":"string","description":"The note's text (Markdown). Include the source URL if known."}
+              "content":{"type":"string","description":"The substance itself, in Markdown: the passage, or the key facts as a short list. For a comparison, one line per difference that matters, e.g. \"- Battery: 4700 mAh vs 4000 mAh\". Only facts shown on screen; never add facts from memory. End with \"Source: <URL>\" when the URL is known. Never just a link."}
             },"required":["title","content"]}
             """#,
             readOnly: false,
             integration: "filesystem")
+    }
+
+    /// Wade's check before a note is offered (see `Grounding`).
+    public static func validator(context: [String: String], digest: String) -> @Sendable (MCPTool, String) -> String? {
+        { tool, args in tool.name == saveNoteName ? Grounding.problem(withNote: args, context: context, digest: digest) : nil }
     }
 
     /// Translate a composed call into the underlying MCP call: (tool name on the server, arguments).

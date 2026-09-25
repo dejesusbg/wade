@@ -59,14 +59,23 @@ if arg == "gemini-raw" {
 if arg == "tools-e2e" {
     // Phase 5 end to end, headless: real filesystem MCP server on a scratch folder, a selection
     // moment, the chosen provider composes with tools, then a simulated "Do it" click.
-    //   wade-exec-check tools-e2e <folder> [catalog id]
+    //   wade-exec-check tools-e2e <folder> [catalog id] [compare | compare-thin]
+    // "compare": a phone-comparison page (settled, comparing) instead of a selection.
     let rest = Array(CommandLine.arguments.dropFirst(2))
     guard let folder = rest.first else { out("usage: tools-e2e <folder> [id]\n"); exit(2) }
     let manager = MCPManager()
     await manager.apply([MCPServerSpec.filesystem(folders: [folder])].compactMap { $0 }, notesFolder: folder)
     out("servers: \(await manager.statuses.map { "\($0.integration): \($0.state)" })\n")
 
-    let trigger = TriggerFired(
+    let compare = rest.count > 2 && rest[2].hasPrefix("compare")
+    let thin = rest.count > 2 && rest[2] == "compare-thin"  // only a title on screen, like a JS-built table
+    let trigger = compare ? TriggerFired(
+        suggestionId: "e2e", gateScore: 0, jspaceConcepts: ["compare", "share"],
+        tkgDigest: "In Google Chrome ('Pixel 10 vs Galaxy S26 - specs', gsmarena.com) for 1min.",
+        timestamp: 0, mode: "comparing", kind: "settled",
+        context: ["app": "Google Chrome", "title": "Pixel 10 vs Galaxy S26 - specs", "url": "https://www.gsmarena.com/compare.php3",
+                  "excerpt": thin ? "Pixel 10 vs Galaxy S26 - specs · Compare" : "Compare · Pixel 10 · Galaxy S26 · Display 6.3\" OLED 120Hz · 6.2\" AMOLED 120Hz · Battery 4700 mAh · 4000 mAh · Charging 30W · 25W · Weight 198 g · 167 g · Main camera 50 MP · 50 MP · Price about $799 · about $849"])
+    : TriggerFired(
         suggestionId: "e2e", gateScore: 0, jspaceConcepts: ["save", "annotate"],
         tkgDigest: "In Safari ('Frontiers | AI and digital accessibility', frontiersin.org) for 40s.",
         timestamp: 0, mode: "researching", kind: "selection",
@@ -77,7 +86,7 @@ if arg == "tools-e2e" {
     let offered = ToolSelection.pick(from: all, mode: trigger.mode, kind: trigger.kind, url: trigger.context?["url"])
     out("offered: \(offered.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))  (* = runs only on click)\n")
 
-    final class Box: @unchecked Sendable { var proposals: [ProposedAction] = []; var ran: [String] = [] }
+    final class Box: @unchecked Sendable { var proposals: [ProposedAction] = []; var ran: [String] = []; var refused = 0 }
     let box = Box()
     struct LoggingRunner: ToolRunner {
         let inner: MCPManager
@@ -87,11 +96,17 @@ if arg == "tools-e2e" {
             catch { out("  → error: \(error.localizedDescription)\n"); throw error }
         }
     }
-    let tools = ToolBox(tools: offered, runner: LoggingRunner(inner: manager)) { event in
+    let screen = ExecutionPrompt(trigger: trigger, facts: [], corrections: [])
+    let tools = ToolBox(tools: offered, runner: LoggingRunner(inner: manager),
+                        validate: { tool, args in
+                            let problem = ComposedTools.validator(context: screen.context, digest: screen.digest)(tool, args)
+                            if let problem { box.refused += 1; out("  REFUSED \(tool.name): \(problem)\n") }
+                            return problem
+                        }) { event in
         switch event {
         case .proposed(let p): box.proposals.append(p)
         case .toolRan(let name, let ok): box.ran.append("\(name)\(ok ? "" : " (failed)")")
-        case .text: break
+        case .refused, .text: break
         }
     }
     let id = rest.count > 1 ? rest[1] : "apple.on-device"
@@ -107,8 +122,9 @@ if arg == "tools-e2e" {
     } catch { out("\nFAILED: \(error.localizedDescription)") }
     out(String(format: "\n--- %.1fs · read-only tools ran: %@ · proposed: %d\n", Date().timeIntervalSince(t0),
                box.ran.isEmpty ? "none" : box.ran.joined(separator: ", "), box.proposals.count))
+    if box.refused > 0 && box.proposals.isEmpty { out("(the app drops this suggestion: its only action was refused)\n") }
     for p in box.proposals {
-        out("PROPOSED \(p.tool.name) \(p.argumentsJSON.prefix(300))\n")
+        out("PROPOSED \(p.tool.name) \(p.argumentsJSON.prefix(700))\n")
         out("simulating the user's click on Do it…\n")
         do { out("RESULT: \(try await manager.call(p.tool, argumentsJSON: p.argumentsJSON).prefix(300))\n") }
         catch { out("ACTION FAILED: \(error.localizedDescription)\n") }
@@ -150,7 +166,7 @@ if arg == "github-e2e" {
         switch event {
         case .proposed(let p): box.proposals.append(p)
         case .toolRan(let name, let ok): box.ran.append("\(name)\(ok ? "" : " (failed)")")
-        case .text: break
+        case .refused, .text: break
         }
     }
     guard let d = ProviderCatalog.find(rest.count > 1 ? rest[1] : "apple.on-device") else { exit(2) }

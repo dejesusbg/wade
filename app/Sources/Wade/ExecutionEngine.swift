@@ -51,6 +51,7 @@ final class ExecutionEngine {
         var skipped: [String] = []  // providers tried first and why they didn't run
         var proposals: [Proposal] = []
         var toolsRan: [String] = []  // read-only tools the model used while composing
+        var refused = 0  // proposals Wade's check turned down (e.g. a note with invented facts)
         var text = ""
         var status = Status.streaming
         let startedAt = Date()
@@ -165,7 +166,8 @@ final class ExecutionEngine {
             // Tools for this moment: a small curated subset of what the opted-in servers offer.
             let offered = ToolSelection.pick(from: await manager.allTools(), mode: trigger.mode,
                                              kind: trigger.kind, url: trigger.context?["url"])
-            let tools = ToolBox(tools: offered, runner: manager, onEvent: onToolEvent)
+            let tools = ToolBox(tools: offered, runner: manager,
+                                validate: ComposedTools.validator(context: prompt.context, digest: prompt.digest), onEvent: onToolEvent)
             let stream = ProviderChain.run(chain, prompt: prompt, tools: tools, firstTokenTimeout: timeout) { descriptor in
                 descriptor.makeProvider(key: APIKeyStore.read(descriptor.vendor))
             }
@@ -187,7 +189,10 @@ final class ExecutionEngine {
                     self.current = s
                 }
                 guard let self else { return }
-                self.finish(self.isNothing(self.current?.text ?? "") ? .dropped : .done)
+                // An offer whose only action was refused (and none was proposed) has nothing
+                // to click: "Save the comparison…" with no button. Drop it like NOTHING.
+                let offerWithoutAction = (self.current?.refused ?? 0) > 0 && (self.current?.proposals.isEmpty ?? true)
+                self.finish(self.isNothing(self.current?.text ?? "") || offerWithoutAction ? .dropped : .done)
             } catch {
                 guard let self, !Task.isCancelled else { return }
                 self.finish(.failed(error.localizedDescription))
@@ -204,6 +209,9 @@ final class ExecutionEngine {
             s.proposals.append(Proposal(action: action))
         case .toolRan(let name, let ok):
             s.toolsRan.append(ok ? name : "\(name) (failed)")
+        case .refused(let name, let reason):
+            s.refused += 1
+            log.info("refused \(name, privacy: .public): \(reason, privacy: .public)")
         case .text:
             break
         }
