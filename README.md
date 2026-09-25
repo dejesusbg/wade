@@ -244,9 +244,23 @@ protocol:
 - **Measured, Apple on-device:** first words in **1.2–1.5s**, done in **1.3–1.7s**, both headless
   and inside the app. Output: *"Clone the repository using the web URL:
   https://github.com/dejesusbg/monet.git."*
-- **No-text timeout: 2.5s.** `ProviderChain` skips any provider with no text by then (a late
-  suggestion is useless) and moves to the next entry. Same rule for every provider. On-device
-  fits comfortably: 0.64–1.0s to first text in the app, about 1.2s headless.
+- **No-text timeout: 2.5s by default, adjustable from 1.5 to 10s** (Settings → Suggestions →
+  "Give up after"). `ProviderChain` skips any provider with no text by then (a late suggestion
+  is useless) and moves to the next entry. Same rule for every provider. On-device fits at
+  2.5s: 0.64–1.0s to first text in the app. At 1.0s even on-device misses its first answer
+  after launch (verified), hence the 1.5s floor.
+- **Older Gemini models, same session, real prompt, 5 runs each (2026-09-25):**
+
+  | Model | Answered | First text | Under 2.5s |
+  |---|---|---|---|
+  | `gemini-3.5-flash` | 0/5 | 503 ×2, 30s timeout ×3 | 0 |
+  | `gemini-3.5-flash-lite` | 5/5 | 0.76, 1.00, 1.61, 8.16, 14.86s | 3 |
+  | `gemini-3.1-flash-lite` | 3/5 | 5.22, 12.80, 21.81s (+1 timeout, +1×503) | 0 |
+  | `gemini-flash-lite-latest` (fallback) | 5/5 | 1.09, 1.63, 2.62, 2.67, 9.06s | 2 |
+
+  Older models aren't faster. Flash-Lite 3.5 and the current alias behave about the same
+  (median around 1.6s, long tails), and 3.1-lite is worse. Five runs in one session is a small,
+  noisy sample.
 - **Gemini, tested live (2026-09-25):**
   - The key can use `gemini-flash-latest`, `gemini-3.8-flash`, `gemini-3.5-flash`,
     `gemini-flash-lite-latest` and others (`wade-exec-check gemini-models`).

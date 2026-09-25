@@ -79,10 +79,15 @@ struct ExecutionSettingsView: View {
                         Text(label(d)).tag(d.id)
                     }
                 }
+                LabeledContent("Give up after") {
+                    Stepper(value: $engine.timeoutSeconds, in: ExecutionEngine.timeoutRange, step: 0.5) {
+                        Text(String(format: "%.1f s", engine.timeoutSeconds)).monospacedDigit()
+                    }
+                }
             } header: {
                 Text("Who writes suggestions")
             } footer: {
-                Text("If the primary can't run (no key, setup missing, rate limit, unavailable), the fallback writes instead. Both come from the same list.")
+                Text("If the primary can't run (no key, setup missing, rate limit, unavailable) or hasn't written anything by \"Give up after\", the fallback writes instead. Both come from the same list. A suggestion that arrives late is no help, so keep this short.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {

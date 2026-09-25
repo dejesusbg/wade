@@ -39,6 +39,11 @@ final class ExecutionEngine {
     var fallbackID: String? {
         didSet { UserDefaults.standard.set(fallbackID ?? "", forKey: Self.fallbackKey) }
     }
+    /// Seconds a provider may take to produce its first text before the next one is tried.
+    var timeoutSeconds: Double {
+        didSet { UserDefaults.standard.set(timeoutSeconds, forKey: Self.timeoutKey) }
+    }
+    static let timeoutRange: ClosedRange<Double> = 1.5...10  // below ~1.5s even the on-device model misses its first answer after launch
     /// Which vendors have a key in the Keychain (for Settings; keys themselves are never held here).
     private(set) var keyed: Set<Vendor> = Set(Vendor.allCases.filter { APIKeyStore.read($0) != nil })
 
@@ -53,12 +58,18 @@ final class ExecutionEngine {
     private let log = Logger(subsystem: "wade", category: "execution")
     private static let primaryKey = "execution.primary"
     private static let fallbackKey = "execution.fallback"
+    private static let timeoutKey = "execution.timeout"
 
     init(memory: MemoryModel) {
         self.memory = memory
         let d = UserDefaults.standard
         primaryID = d.string(forKey: Self.primaryKey).flatMap { ProviderCatalog.find($0)?.id }
             ?? ProviderCatalog.defaultPrimaryID
+        let storedTimeout = d.double(forKey: Self.timeoutKey)
+        let defaultTimeout = Double(ProviderChain.defaultFirstTokenTimeout.components.seconds)
+            + Double(ProviderChain.defaultFirstTokenTimeout.components.attoseconds) / 1e18
+        timeoutSeconds = storedTimeout > 0 ? min(max(storedTimeout, Self.timeoutRange.lowerBound), Self.timeoutRange.upperBound)
+                                          : defaultTimeout
         if let stored = d.string(forKey: Self.fallbackKey) {
             fallbackID = stored.isEmpty ? nil : ProviderCatalog.find(stored)?.id
         } else {
@@ -88,7 +99,8 @@ final class ExecutionEngine {
         log.info("execution: \(chain.map(\.id).joined(separator: " → "), privacy: .public) for \(trigger.kind ?? "?", privacy: .public)/\(trigger.mode ?? "?", privacy: .public)")
 
         task = Task { [weak self] in
-            let stream = ProviderChain.run(chain, prompt: prompt) { descriptor in
+            let timeout = Duration.milliseconds(Int((self?.timeoutSeconds ?? 2.5) * 1000))
+            let stream = ProviderChain.run(chain, prompt: prompt, firstTokenTimeout: timeout) { descriptor in
                 descriptor.makeProvider(key: APIKeyStore.read(descriptor.vendor))
             }
             do {
