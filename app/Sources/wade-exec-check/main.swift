@@ -72,12 +72,22 @@ if arg == "tools-e2e" {
         timestamp: 0, mode: "researching", kind: "selection",
         context: ["app": "Safari", "url": "https://www.frontiersin.org/articles/10.3389/frai.2024.00001/full",
                   "selection": "AI is already being used to analyze medical images and detect diseases such as cancer, which could improve accessibility of diagnosis for people with disabilities."])
-    let offered = ToolSelection.pick(from: await manager.allTools(), mode: trigger.mode, kind: trigger.kind, url: trigger.context?["url"])
+    let all = await manager.allTools()
+    out("all: \(all.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))\n")
+    let offered = ToolSelection.pick(from: all, mode: trigger.mode, kind: trigger.kind, url: trigger.context?["url"])
     out("offered: \(offered.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))  (* = runs only on click)\n")
 
     final class Box: @unchecked Sendable { var proposals: [ProposedAction] = []; var ran: [String] = [] }
     let box = Box()
-    let tools = ToolBox(tools: offered, runner: manager) { event in
+    struct LoggingRunner: ToolRunner {
+        let inner: MCPManager
+        func call(_ tool: MCPTool, argumentsJSON: String) async throws -> String {
+            out("  call \(tool.name) \(argumentsJSON)\n")
+            do { let r = try await inner.call(tool, argumentsJSON: argumentsJSON); out("  → \(r.prefix(160))\n"); return r }
+            catch { out("  → error: \(error.localizedDescription)\n"); throw error }
+        }
+    }
+    let tools = ToolBox(tools: offered, runner: LoggingRunner(inner: manager)) { event in
         switch event {
         case .proposed(let p): box.proposals.append(p)
         case .toolRan(let name, let ok): box.ran.append("\(name)\(ok ? "" : " (failed)")")
@@ -102,6 +112,65 @@ if arg == "tools-e2e" {
         out("simulating the user's click on Do it…\n")
         do { out("RESULT: \(try await manager.call(p.tool, argumentsJSON: p.argumentsJSON).prefix(300))\n") }
         catch { out("ACTION FAILED: \(error.localizedDescription)\n") }
+    }
+    await manager.stopAll()
+    exit(0)
+}
+
+if arg == "github-e2e" {
+    // Phase 5, headless: real github-mcp-server with the saved token, a repo-page moment,
+    // composition with tools. Proposals are only printed, never executed (they'd change GitHub).
+    //   wade-exec-check github-e2e [owner/repo] [catalog id]
+    let rest = Array(CommandLine.arguments.dropFirst(2))
+    let repo = rest.first ?? "dejesusbg/monet"
+    guard let token = APIKeyStore.read(account: "github-token") else { out("no GitHub token in the Keychain\n"); exit(1) }
+    let manager = MCPManager()
+    await manager.apply([MCPServerSpec.github(token: token)].compactMap { $0 })
+    out("servers: \(await manager.statuses.map { "\($0.integration): \($0.state)" })\n")
+    let trigger = TriggerFired(
+        suggestionId: "gh", gateScore: 0, jspaceConcepts: ["download", "clone"],
+        tkgDigest: "In Google Chrome ('\(repo)', github.com) for 16s.", timestamp: 0, mode: "coding", kind: "settled",
+        context: ["app": "Google Chrome", "url": "https://github.com/\(repo)",
+                  "excerpt": "Code · Releases · Clone · HTTPS · https://github.com/\(repo).git · Download ZIP"])
+    let all = await manager.allTools()
+    out("all: \(all.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))\n")
+    let offered = ToolSelection.pick(from: all, mode: trigger.mode, kind: trigger.kind, url: trigger.context?["url"])
+    out("offered: \(offered.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))  (* = click-only)\n")
+    final class Box: @unchecked Sendable { var proposals: [ProposedAction] = []; var ran: [String] = [] }
+    let box = Box()
+    struct LoggingRunner: ToolRunner {
+        let inner: MCPManager
+        func call(_ tool: MCPTool, argumentsJSON: String) async throws -> String {
+            out("  call \(tool.name) \(argumentsJSON)\n")
+            do { let r = try await inner.call(tool, argumentsJSON: argumentsJSON); out("  → \(r.prefix(160))\n"); return r }
+            catch { out("  → error: \(error.localizedDescription)\n"); throw error }
+        }
+    }
+    let tools = ToolBox(tools: offered, runner: LoggingRunner(inner: manager)) { event in
+        switch event {
+        case .proposed(let p): box.proposals.append(p)
+        case .toolRan(let name, let ok): box.ran.append("\(name)\(ok ? "" : " (failed)")")
+        case .text: break
+        }
+    }
+    guard let d = ProviderCatalog.find(rest.count > 1 ? rest[1] : "apple.on-device") else { exit(2) }
+    let t0 = Date()
+    out("\n--- suggestion (\(d.title)):\n")
+    do {
+        for try await e in ProviderChain.run([d], prompt: ExecutionPrompt(trigger: trigger, facts: [], corrections: []),
+                                             tools: tools, firstTokenTimeout: .seconds(20),
+                                             resolve: { $0.makeProvider(key: APIKeyStore.read($0.vendor)) }) {
+            if case .text(let t) = e { out(t) }
+        }
+    } catch { out("\nFAILED: \(error.localizedDescription)") }
+    out(String(format: "\n--- %.1fs · lookups ran: %@\n", Date().timeIntervalSince(t0), box.ran.isEmpty ? "none" : box.ran.joined(separator: ", ")))
+    for p in box.proposals { out("PROPOSED (not executed) \(p.tool.name) \(p.argumentsJSON.prefix(200))\n") }
+    // Direct lookup, to confirm the token and server work independent of the model's choices.
+    if let latest = offered.first(where: { $0.name == "github__get_latest_release" }) {
+        let parts = repo.split(separator: "/").map(String.init)
+        let args = #"{"owner":"\#(parts[0])","repo":"\#(parts[1])"}"#
+        do { out("direct get_latest_release: \(try await manager.call(latest, argumentsJSON: args).prefix(200))\n") }
+        catch { out("direct get_latest_release failed: \(error.localizedDescription)\n") }
     }
     await manager.stopAll()
     exit(0)
