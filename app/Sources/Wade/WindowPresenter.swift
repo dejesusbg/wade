@@ -36,7 +36,7 @@ final class WindowPresenter {
         case .settings:
             title = "Wade Settings"
             content = AnyView(SettingsView(permission: model.permission, memory: model.memory,
-                                           execution: model.execution, integrations: model.integrations))
+                                           execution: model.execution, integrations: model.integrations, app: model))
         }
         let window = NSWindow(contentViewController: NSHostingController(rootView: content))
         window.title = title

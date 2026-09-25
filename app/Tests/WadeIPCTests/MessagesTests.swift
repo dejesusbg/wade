@@ -20,6 +20,12 @@ import Testing
         #expect(try Wire.decoder.decode(TKGEvent.self, from: Wire.encoder.encode(event)) == event)
     }
 
+    @Test func configUsesTheBackendsKeys() throws {
+        let json = try JSONSerialization.jsonObject(with: Wire.encoder.encode(BackendConfig(settledDwellS: 8))) as! [String: Any]
+        #expect(json["type"] as? String == "config")
+        #expect(json["settled_dwell_s"] as? Double == 8)
+    }
+
     @Test func decodesTriggerFiredFromBackendShape() throws {
         let line = Data(#"{"type":"trigger_fired","suggestion_id":"abc","gate_score":0.83,"jspace_concepts":["stuck","error"],"tkg_digest":"d","timestamp":1.0}"#.utf8)
         guard case .triggerFired(let t) = try Wire.decodeInbound(line) else {

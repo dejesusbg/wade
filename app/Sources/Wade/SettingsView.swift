@@ -6,6 +6,7 @@ struct SettingsView: View {
     let memory: MemoryModel
     let execution: ExecutionEngine
     let integrations: IntegrationsModel
+    let app: AppModel
 
     var body: some View {
         TabView {
@@ -49,7 +50,7 @@ struct SettingsView: View {
                 IntegrationsSettingsView(memory: memory, integrations: integrations)
             }
             Tab("Suggestions", systemImage: "text.bubble") {
-                ExecutionSettingsView(engine: execution)
+                ExecutionSettingsView(engine: execution, app: app)
             }
             Tab("Permissions", systemImage: "lock.shield") {
                 Form {

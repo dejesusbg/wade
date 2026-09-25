@@ -233,6 +233,7 @@ struct IntegrationsSettingsView: View {
 /// API key per cloud vendor.
 struct ExecutionSettingsView: View {
     @Bindable var engine: ExecutionEngine
+    @Bindable var app: AppModel
     @State private var drafts: [Vendor: String] = [:]
 
     var body: some View {
@@ -251,14 +252,36 @@ struct ExecutionSettingsView: View {
                     }
                 }
                 LabeledContent("Give up after") {
-                    Stepper(value: $engine.timeoutSeconds, in: ExecutionEngine.timeoutRange, step: 0.5) {
-                        Text(String(format: "%.1f s", engine.timeoutSeconds)).monospacedDigit()
+                    HStack {
+                        Stepper(value: $engine.timeoutSeconds, in: ExecutionEngine.timeoutRange, step: 0.5) {
+                            Text(String(format: "%.1f s", engine.timeoutSeconds)).monospacedDigit()
+                        }
+                        resetButton(isDefault: engine.timeoutSeconds == ExecutionEngine.defaultTimeoutSeconds) {
+                            engine.timeoutSeconds = ExecutionEngine.defaultTimeoutSeconds
+                        }
                     }
                 }
             } header: {
                 Text("Who writes suggestions")
             } footer: {
                 Text("If the primary can't run (no key, setup missing, rate limit, unavailable) or hasn't written anything by \"Give up after\", the fallback writes instead. Both come from the same list. A suggestion that arrives late is no help, so keep this short.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                LabeledContent("A page counts as settled after") {
+                    HStack {
+                        Stepper(value: $app.settledDwell, in: AppModel.settledRange, step: 1) {
+                            Text(String(format: "%.0f s", app.settledDwell)).monospacedDigit()
+                        }
+                        resetButton(isDefault: app.settledDwell == AppModel.settledDefault) {
+                            app.settledDwell = AppModel.settledDefault
+                        }
+                    }
+                }
+            } header: {
+                Text("When Wade looks")
+            } footer: {
+                Text("How long you stay on one page or document before Wade takes a look at it. Shorter means Wade checks sooner, and checks more of the pages you only pass through. Selected text and repeated errors don't wait for this. Search results and the browser's own pages are never checked.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
@@ -293,6 +316,14 @@ struct ExecutionSettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func resetButton(isDefault: Bool, action: @escaping () -> Void) -> some View {
+        Button("Reset", systemImage: "arrow.counterclockwise", action: action)
+            .labelStyle(.iconOnly)
+            .buttonStyle(.borderless)
+            .disabled(isDefault)
+            .help("Reset to the default")
     }
 
     private func label(_ d: ProviderDescriptor) -> String {

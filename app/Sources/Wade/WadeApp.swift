@@ -28,7 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.model = model
         self.windows = windows
         statusItem = StatusItemController(model: model, windows: windows)
-        if !model.memory.onboardingCompleted { windows.show(.onboarding) }
+        if !model.memory.onboardingCompleted {
+            windows.show(.onboarding)
+        } else {
+            // A menu-bar app has nothing to show at launch: give focus straight back to the app
+            // the user was in (launching made Wade active and took typing focus, 2026-09-25).
+            NSApp.deactivate()
+        }
     }
 }
 
@@ -46,16 +52,36 @@ final class AppModel {
 
     private let client = BackendClient()
     let backend = BackendLauncher()
+
+    /// Seconds on one page before it counts as "settled" (Stage 1). Sent to the backend.
+    var settledDwell: Double {
+        didSet {
+            UserDefaults.standard.set(settledDwell, forKey: Self.settledKey)
+            sendConfig()
+        }
+    }
+    static let settledRange: ClosedRange<Double> = 5...60
+    static let settledDefault: Double = 15
+    private static let settledKey = "moments.settled"
+
+    private func sendConfig() {
+        client.send(BackendConfig(settledDwellS: settledDwell))
+    }
     @ObservationIgnored private lazy var observer = ActivityObserver { [weak self] event in
         self?.forward(event)
     }
 
     init() {
+        let stored = UserDefaults.standard.double(forKey: Self.settledKey)
+        settledDwell = stored > 0 ? min(max(stored, Self.settledRange.lowerBound), Self.settledRange.upperBound) : Self.settledDefault
         client.start()
         Task { [client] in
             for await state in client.states {
                 self.backendState = state
-                if state == .connected { self.backend.connected() }
+                if state == .connected {
+                    self.backend.connected()
+                    self.sendConfig()  // every (re)connect: a restarted backend starts from defaults
+                }
             }
         }
         // Give an already-running backend (started by hand) a moment to accept the connection;

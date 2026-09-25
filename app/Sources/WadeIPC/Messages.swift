@@ -99,6 +99,16 @@ public struct TriggerFired: Codable, Sendable, Equatable {
     }
 }
 
+/// The app's settings that Stage 1 uses. Sent on every connect and whenever one changes.
+public struct BackendConfig: Codable, Sendable, Equatable {
+    public var type = "config"
+    public var settledDwellS: Double  // "settled_dwell_s" on the wire
+
+    public init(settledDwellS: Double) {
+        self.settledDwellS = settledDwellS
+    }
+}
+
 /// Liveness check only; not part of the trigger protocol proper.
 public struct Ping: Codable, Sendable {
     public var type = "ping"

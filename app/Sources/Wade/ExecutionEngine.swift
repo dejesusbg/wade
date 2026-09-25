@@ -98,7 +98,9 @@ final class ExecutionEngine {
         didSet { UserDefaults.standard.set(researchLogEnabled, forKey: Self.researchLogKey) }
     }
     private let verdicts = VerdictLog()
-    static let timeoutRange: ClosedRange<Double> = 1.5...10  // below ~1.5s even the on-device model misses its first answer after launch
+    static let timeoutRange: ClosedRange<Double> = 1.5...10
+    static let defaultTimeoutSeconds = Double(ProviderChain.defaultFirstTokenTimeout.components.seconds)
+        + Double(ProviderChain.defaultFirstTokenTimeout.components.attoseconds) / 1e18  // below ~1.5s even the on-device model misses its first answer after launch
     /// Which vendors have a key in the Keychain (for Settings; keys themselves are never held here).
     private(set) var keyed: Set<Vendor> = Set(Vendor.allCases.filter { APIKeyStore.read($0) != nil })
 
@@ -125,10 +127,8 @@ final class ExecutionEngine {
         primaryID = d.string(forKey: Self.primaryKey).flatMap { ProviderCatalog.find($0)?.id }
             ?? ProviderCatalog.defaultPrimaryID
         let storedTimeout = d.double(forKey: Self.timeoutKey)
-        let defaultTimeout = Double(ProviderChain.defaultFirstTokenTimeout.components.seconds)
-            + Double(ProviderChain.defaultFirstTokenTimeout.components.attoseconds) / 1e18
         timeoutSeconds = storedTimeout > 0 ? min(max(storedTimeout, Self.timeoutRange.lowerBound), Self.timeoutRange.upperBound)
-                                          : defaultTimeout
+                                          : Self.defaultTimeoutSeconds
         if let stored = d.string(forKey: Self.fallbackKey) {
             fallbackID = stored.isEmpty ? nil : ProviderCatalog.find(stored)?.id
         } else {

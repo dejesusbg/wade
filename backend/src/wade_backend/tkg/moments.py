@@ -49,6 +49,38 @@ class CheckRequest:
     score: float | None = None  # stuck score, when kind == "stuck"
 
 
+SETTLE_RANGE = (5.0, 60.0)  # seconds; the app's Settings offers the same range
+
+# Pages that are a way *to* something, not the thing itself: a browser's own pages and search
+# results. Checking them produced junk (a note of the new-tab page's search suggestions) and
+# offers while the user was still searching (live run, 2026-09-25).
+_INTERNAL_SCHEMES = ("chrome:", "about:", "edge:", "brave:", "arc:", "vivaldi:", "opera:",
+                     "safari-resource:", "favorites:", "chrome-search:", "devtools:")
+_SEARCH_PAGES = (
+    ("google.", "/search"), ("bing.com", "/search"), ("duckduckgo.com", "/"), ("search.yahoo.com", "/search"),
+    ("ecosia.org", "/search"), ("search.brave.com", "/search"), ("yandex.", "/search"), ("baidu.com", "/s"),
+    ("perplexity.ai", "/search"), ("startpage.com", "/sp/search"),
+)
+
+
+def is_transit_page(url: str | None) -> bool:
+    """A browser-internal page or a search results page: never a settled or selection moment."""
+    if not url:
+        return False
+    low = url.lower()
+    if low.startswith(_INTERNAL_SCHEMES):
+        return True
+    from urllib.parse import urlparse
+
+    parsed = urlparse(low)
+    host = parsed.netloc.removeprefix("www.")
+    for domain, path in _SEARCH_PAGES:
+        if (host.startswith(domain) or host.endswith("." + domain) or host == domain.rstrip(".")) \
+                and parsed.path.startswith(path) and ("q=" in parsed.query or path != "/"):
+            return True
+    return False
+
+
 def context_key(focus: FocusEvent) -> str:
     return f"{focus.app_bundle_id}|{focus.url or focus.window_title}"
 
@@ -80,8 +112,11 @@ class MomentDetector:
             return None
         f = extract(g)
 
+        focus = g.current_focus()
+        transit = bool(focus) and is_transit_page(focus.url)
+
         selections = g.actions("selection")
-        if selections:
+        if selections and not transit:
             sel = selections[-1]
             age = now - sel.ts
             text = str(sel.metadata.get("text", ""))
@@ -90,8 +125,7 @@ class MomentDetector:
                 self.checked_selection_ts = sel.ts
                 return self._check(g, f, "selection", ("text_selected",))
 
-        focus = g.current_focus()
-        if focus and focus.snapshotted and now - focus.ts_start >= self.cfg.settle_s:
+        if focus and not transit and focus.snapshotted and now - focus.ts_start >= self.cfg.settle_s:
             key = context_key(focus)
             if key not in self.checked_contexts:
                 self.checked_contexts[key] = now
@@ -103,6 +137,14 @@ class MomentDetector:
             self.audit_clock = now
             return self._check(g, f, "audit", ("periodic_audit",), surface=False)
         return None
+
+    def set_settle(self, seconds: float) -> float:
+        """The app's "settled after" setting, clamped to SETTLE_RANGE. Returns what applies."""
+        from dataclasses import replace
+
+        value = min(max(float(seconds), SETTLE_RANGE[0]), SETTLE_RANGE[1])
+        self.cfg = replace(self.cfg, settle_s=value)
+        return value
 
     def _over_budget(self, now: float) -> bool:
         self.check_times = [t for t in self.check_times if now - t < 3600]

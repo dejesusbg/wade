@@ -120,7 +120,15 @@ def main() -> None:
             event.get("metadata") or "", decision.score, ",".join(decision.reasons),
         )
 
-    server = BackendServer(args.socket or protocol.default_socket_path(), on_tkg_event)
+    def on_config(message: dict) -> None:
+        if "settled_dwell_s" in message:
+            try:
+                applied = stage1.moments.set_settle(message["settled_dwell_s"])
+                log.info("config: settled after %.0fs", applied)
+            except (TypeError, ValueError):
+                log.warning("ignoring bad settled_dwell_s %r", message.get("settled_dwell_s"))
+
+    server = BackendServer(args.socket or protocol.default_socket_path(), on_tkg_event, on_config)
 
     async def run() -> None:
         # SIGTERM is how launchd / the app will stop us; SIGINT is ignored when run as a

@@ -347,3 +347,31 @@ def test_replay_cli(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr()
     assert "CHECK stuck" in out.out and "CHECK settled" in out.out
     assert "skipped" in out.err
+
+
+def test_transit_pages_are_never_settled_or_selection_moments():
+    from wade_backend.tkg.moments import is_transit_page
+
+    assert is_transit_page("chrome://newtab/") and is_transit_page("about:blank")
+    assert is_transit_page("https://www.google.com/search?q=compare+macbook+air")
+    assert is_transit_page("https://www.google.com.co/search?q=x") and is_transit_page("https://duckduckgo.com/?q=x")
+    assert not is_transit_page("https://www.google.com/travel/flights")  # a destination, not a search
+    assert not is_transit_page("https://www.apple.com/uk/iphone/compare/") and not is_transit_page(None)
+
+    s = Session().focus(CHROME, "compare macbook - Google Search") \
+        .snapshot("https://www.google.com/search?q=compare+macbook", "About 1,000 results · MacBook Air vs Pro") \
+        .wait(3).select("MacBook Air M5 vs MacBook Pro M5: which should you buy this year").wait(25)
+    _, _, checks = run(s)
+    assert not [c for c in checks if c.kind in ("settled", "selection")]
+
+
+def test_settled_dwell_is_configurable_and_clamped():
+    stage1 = Stage1()
+    assert stage1.moments.set_settle(8) == 8 and stage1.moments.cfg.settle_s == 8
+    assert stage1.moments.set_settle(1) == 5 and stage1.moments.set_settle(500) == 60
+    s = Session().focus(CHROME, "Repo").snapshot("https://github.com/a/b", "Clone HTTPS").wait(9)
+    checks = []
+    fast = Stage1(on_check=checks.append)
+    fast.moments.set_settle(8)
+    fast.replay(s.events, until=s.t)
+    assert any(c.kind == "settled" for c in checks)  # with the default 15s this would be nothing yet

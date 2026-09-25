@@ -18,9 +18,11 @@ EventHandler = Callable[[dict[str, Any]], None]
 
 
 class BackendServer:
-    def __init__(self, socket_path: Path, on_tkg_event: EventHandler | None = None) -> None:
+    def __init__(self, socket_path: Path, on_tkg_event: EventHandler | None = None,
+                 on_config: EventHandler | None = None) -> None:
         self.socket_path = socket_path
         self._on_tkg_event = on_tkg_event or (lambda _event: None)
+        self._on_config = on_config or (lambda _message: None)
         self._writers: set[asyncio.StreamWriter] = set()
         self._server: asyncio.AbstractServer | None = None
 
@@ -79,5 +81,7 @@ class BackendServer:
                 await writer.drain()
             case "tkg_event":
                 self._on_tkg_event(message)
+            case "config":  # the app's settings that Stage 1 uses (e.g. the settled dwell)
+                self._on_config(message)
             case other:
                 log.warning("ignoring unknown message type %r", other)
