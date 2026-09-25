@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 5 (MCP tool layer) in progress: your folder + GitHub token, then the real end-to-end run
+## Status: Phase 5 (MCP tool layer): tool path works; a real Stage 2 trigger hasn't fired live yet (see Phase 5 notes)
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -332,6 +332,8 @@ described the action instead of proposing it. With `save_note` it proposed in 5 
 - Foundation Models: each MCP tool becomes a `Tool` via `DynamicGenerationSchema` (on-device, and
   Claude later).
 - Gemini: a function-calling loop that echoes the model's parts, including `thoughtSignature`.
+  Schemas go in `parametersJsonSchema`: the older `parameters` field accepts only an OpenAPI
+  subset and rejected GitHub's real schemas (`x-mcp-header`, `additionalProperties`, type lists).
 - Claude's direct route: no tools yet (untested without credits).
 
 **Timeout:** tool activity counts as progress, so a model busy proposing an action isn't cut off
@@ -343,8 +345,31 @@ before its first word.
 - In the app (`--sample-note`): Wade starts the filesystem server itself, and the suggestion
   arrives with 1 proposal.
 
+- GitHub, headless (`wade-exec-check github-e2e <owner/repo> [provider]`), on `ml-explore/mlx`:
+  on-device proposed `fork_repository` in 2.8s, and Gemini Flash-Lite in 5.9s. The fork was only
+  printed, never run. A direct `get_latest_release` returned v0.32.2. The server hides tools
+  the token can't use: a read-only token exposed 24 tools, and read + write exposed 45.
+- **Open issues:**
+  - The on-device text said "Clone the repository" while its button would fork.
+  - `list_releases` failed once, with no error captured. The check tool now logs call
+    arguments and errors.
+
+**Live run with Stage 2 (2026-09-25): 11 real checks, 0 fires.**
+- The moments: Google and Reddit pages, a Wikipedia article, the GitHub dashboard, two repo
+  pages, and three text selections.
+- Each check took 0.5–1.0s. Every time, the "nothing" family matched or beat the best action
+  family; "summarize" and "share" came up but lost.
+- So no real trigger reached the tool path. The Phase 5 goal "from a real trigger through to a
+  completed action" is **not met**. What's verified is the path from a made-up trigger to a
+  completed action.
+- This is the §8 generalization risk showing live: the one tested moment that fires (a repo page
+  with the Clone menu open) doesn't carry over to ordinary pages. The threshold was **not**
+  retuned on these few examples; calibration is Phase 7's job.
+
 **Build note:** `scripts/build-check.sh` signs the check tool with your Apple Development
-certificate, so a Keychain "Always Allow" survives rebuilds.
+certificate, so a Keychain "Always Allow" survives rebuilds. Exception: Keychain items that
+were approved for *earlier ad-hoc builds* keep stale per-build entries, and macOS keeps
+prompting for them. Re-saving the key in Settings recreates the item and clears them.
 
 ### What the app observes
 
