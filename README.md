@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 3 (Stage 2 J-lens) in progress, decision pending (see Stage 2 findings)
+## Status: Phase 3 (Stage 2 J-lens) done, check-in pending before Phase 4
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -165,10 +165,36 @@ uv run wade-stage2 eval -v              # synthetic scenarios → Stage 2 → mo
 - **End to end:** `uv run python scripts/stage2_e2e.py` replays a scenario into a real backend
   over the socket, with no screen observation. Result: a stuck check → Stage 2 in 437ms →
   `trigger_fired` with `mode: "fixing"`, the concepts and the digest.
-- **Overnight learned J:** `scripts/overnight-jlens.sh` runs about 120 prompts × 32 tokens, from
-  the hand-written set plus stdlib code and docstrings, in about 7–8h. It keeps the Mac awake
-  with the display off, checkpoints after every prompt, and writes `jlens-learned.npz` plus a
-  validation table. Keep the lid **open** and the Mac plugged in.
+- **Overnight learned J** (`scripts/overnight-jlens.sh`, 2026-09-25): 120 prompts × 32 tokens
+  (hand-written set plus stdlib code and docstrings). Compute took 485 min with 1-min pauses
+  (2 min every 5th) to limit heat. Top-5 agreement with the model's next token:
+
+  | layer | learned J | logit lens (J = I) |
+  |---|---|---|
+  | 13 | **9.8%** | 2.8% |
+  | 18 | **8.4%** | 6.3% |
+  | 23 | 15.4% | **25.2%** |
+  | 27 | 29.4% | **54.5%** |
+  | 32 | 67.8% | **82.5%** |
+
+  The learned J beats the logit lens in the **early** workspace layers, as the paper says it
+  should, but not later on. At 120 prompts, not the paper's 1,000, its noise costs more than the
+  correction gains once the model is near its output.
+- **Readouts compared on the scenarios** (`scripts/compare_lenses.py`, fire/quiet correct):
+  - J = I at 23/27/32: **9/14, 369ms**
+  - learned J, all layers: 8/14, 464ms
+  - learned J, 13/18 only: 5/14 (never fires)
+  - mix (learned at 13/18, J = I later): 9/14, 467ms
+
+  **Default stays J = I at 23/27/32.** Two observations:
+  - The learned J gives cleaner, whole-word concepts (retry, grant, resolve, summarize,
+    annotate) and exposes the model's multilingual workspace (Polish *wyjaśni* "explain",
+    Chinese 念头 "thought").
+  - Early-layer J-space reads the same concepts on *every* check ("prompt", 念头, "quiet",
+    "suggestion", "ready"): it tracks the **task framing** ("suggest or stay quiet?"), not the
+    user's situation. That's a finding for Phase 7 and the write-up, not a bug.
+- **Latency target** (brief §10): p95 ≤ 1s per Stage 2 check on the M5. Measured: median
+  369ms, p95 ~380ms with J = I; about 465ms with a learned J at all layers.
 
 ### What the app observes
 
