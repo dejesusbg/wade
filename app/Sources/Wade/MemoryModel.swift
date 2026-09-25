@@ -60,6 +60,17 @@ final class MemoryModel {
 
     func deleteCorrection(_ id: Int64) { mutate { try store.deleteCorrection(id: id) } }
 
+    /// Explicit feedback on one suggestion (Phase 6's reject / correct).
+    func addCorrection(suggestionId: String, suggestion: String, correction: String,
+                       provenance: CorrectionFact.Provenance) {
+        let text = correction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        mutate {
+            try store.addCorrection(suggestionId: suggestionId, suggestion: suggestion,
+                                    correction: text, provenance: provenance)
+        }
+    }
+
     func completeOnboarding() {
         store.onboardingCompleted = true
         reload()

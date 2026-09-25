@@ -1,13 +1,13 @@
 import Foundation
 import WadeExecution
 import WadeIPC
+import WadeCore
 import WadeTools
 import os
 
-/// Runs the execution stage for each Stage 2 fire and exposes the streaming text to SwiftUI.
-/// The providers are the user's primary and optional fallback from Settings, run through
-/// `ProviderChain` (no provider is special-cased). Placeholder surface for Phase 4; Phase 6
-/// replaces the window with the menu-bar popover.
+/// Runs the execution stage for each Stage 2 fire and exposes the streaming text to SwiftUI
+/// (shown in the menu-bar popover). The providers are the user's primary and optional fallback
+/// from Settings, run through `ProviderChain` (no provider is special-cased).
 @MainActor
 @Observable
 final class ExecutionEngine {
@@ -55,7 +55,29 @@ final class ExecutionEngine {
         let startedAt = Date()
         var firstTokenAfter: TimeInterval?
         var finishedAfter: TimeInterval?
+        var seen = false      // the popover has shown it
+        var feedback: Feedback?
+
+        /// What feedback records as "what Wade suggested".
+        var asSuggested: String {
+            let text = self.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let actions = proposals.map(\.summary).joined(separator: "; ")
+            return [text, actions].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
+
+        var phase: SuggestionSurface.Phase {
+            let hasText = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !proposals.isEmpty
+            switch status {
+            case .streaming: return .composing(hasText: hasText)
+            case .done: return .finished(hasText: hasText)
+            case .dropped: return .quiet
+            case .failed: return .failed
+            }
+        }
     }
+
+    /// Explicit feedback given in the popover (CLAUDE.md §5.7: explicit only).
+    enum Feedback: Equatable { case accepted, rejected, corrected }
 
     private(set) var current: Suggestion?
 
@@ -180,11 +202,45 @@ final class ExecutionEngine {
         current = s
     }
 
+    var phase: SuggestionSurface.Phase { current?.phase ?? .none }
+
+    func markSeen() {
+        guard var s = current, !s.seen else { return }
+        s.seen = true
+        current = s
+    }
+
+    /// "Thanks": the suggestion was fine. Not stored as a correction; nothing to correct.
+    func accept() { setFeedback(.accepted) }
+
+    /// "Not helpful": stored as a rejection, so later suggestions see it.
+    func reject() {
+        guard let s = current, s.feedback == nil else { return }
+        memory.addCorrection(suggestionId: s.id, suggestion: s.asSuggested,
+                             correction: "Not helpful here.", provenance: .rejection)
+        setFeedback(.rejected)
+    }
+
+    /// "Correct…": what the user said would have helped instead.
+    func correct(_ text: String) {
+        guard let s = current, s.feedback != .rejected, s.feedback != .corrected, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        memory.addCorrection(suggestionId: s.id, suggestion: s.asSuggested, correction: text, provenance: .correction)
+        setFeedback(.corrected)
+    }
+
+    private func setFeedback(_ feedback: Feedback) {
+        guard var s = current else { return }
+        s.feedback = feedback
+        current = s
+        log.info("feedback \(String(describing: feedback), privacy: .public) on \(s.id, privacy: .public)")
+    }
+
     /// The user clicked "Do it": run the proposed action through its MCP server.
     func perform(_ proposalID: String) {
         guard let index = current?.proposals.firstIndex(where: { $0.id == proposalID }),
               let action = current?.proposals[index].action, current?.proposals[index].state == .pending else { return }
         setProposal(proposalID, .running)
+        if current?.feedback == nil { setFeedback(.accepted) }
         log.info("user accepted \(action.tool.name, privacy: .public)")
         let manager = integrations.manager
         Task { [weak self] in

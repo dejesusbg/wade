@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 5 done (2026-09-25, with one item open); Phase 6 (menu bar suggestion UI) in progress
+## Status: Phase 6 (menu bar suggestion UI) built and tried by hand; awaiting check-in before Phase 7
 
 ### Open items carried forward
 
@@ -49,8 +49,13 @@ cd app && scripts/bundle.sh && open build/Wade.app
 Tests: `cd app && swift test` (16) and `cd backend && uv run pytest` (47).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
-Menu bar glyph: dashed = not observing (backend down, setup unfinished, or no Accessibility
-access); circle = observing; filled = a trigger arrived.
+Menu bar icon:
+- dashed circle: not observing (backend down, setup unfinished, or no Accessibility access)
+- circle: observing
+- dotted circle: writing a suggestion
+- filled: a suggestion is waiting that you haven't seen
+
+Click the icon for the popover. Its **…** menu has Settings, Setup, Quit and the samples.
 
 Socket: `~/Library/Application Support/Wade/wade.sock` (mode 0600), overridable on both
 sides with `WADE_SOCKET_PATH`. Either process can start first; the app reconnects every 2s.
@@ -257,8 +262,7 @@ protocol:
   - The message carries the mode, the J-space concepts, the digest, the screen context
     (`trigger_fired.context`), your onboarding facts and your last corrections.
   - At most two sentences. `NOTHING` drops the suggestion, a second anti-Clippy guard.
-- **Surface:** a placeholder "Wade Suggestion" window streams live (menu → Show / Try a Sample
-  Suggestion). It's replaced by the Phase 6 popover.
+- **Surface:** the menu-bar popover (Phase 6, below).
 - **Measured, Apple on-device:** first words in **1.2–1.5s**, done in **1.3–1.7s**, both headless
   and inside the app. Output: *"Clone the repository using the web URL:
   https://github.com/dejesusbg/monet.git."*
@@ -391,6 +395,47 @@ certificate, so a Keychain "Always Allow" survives rebuilds. Exception: Keychain
 were approved for *earlier ad-hoc builds* keep stale per-build entries, and macOS keeps
 prompting for them. Re-saving the key in Settings recreates the item and clears them.
 
+### Menu bar suggestion UI (Phase 6)
+
+**Status item and popover.** `StatusItemController` uses AppKit's `NSStatusItem` + `NSPopover`
+rather than SwiftUI's `MenuBarExtra`, because Wade has to open the popover itself, and
+`MenuBarExtra` opens only on a click. The popover is anchored to the icon: no cursor-follow,
+and no floating window.
+
+**When the popover opens by itself** (`SuggestionSurface`, pure and unit-tested):
+- On the suggestion's first words, at most once per suggestion. If you close it, it stays
+  closed, and the icon stays filled until you look.
+- Never for an empty, "nothing worth offering", or failed suggestion.
+- It opens without activating Wade, so whatever you're typing keeps focus. Clicking the icon, or
+  **Correct…**, activates Wade so the popover can take keyboard focus.
+- Untouched, it closes after 20s, unless the pointer is over it. Any click inside keeps it open.
+
+**Feedback,** all explicit (§5.7):
+- **Do it** runs a proposed action. That counts as accepting.
+- **Thanks** accepts. Nothing is stored, since there's nothing to correct.
+- **Not helpful** stores a `user_rejection` correction.
+- **Correct…** stores what you type as a `user_correction`. It stays available after Thanks
+  or Do it (e.g. "save it in another folder next time").
+- Both kinds show up in Settings → Corrections, where you can forget them, and the next
+  suggestions' prompts include the last 10.
+
+**Windows:** Onboarding and Settings are AppKit windows (`WindowPresenter`), because
+SwiftUI's `openWindow` / `SettingsLink` don't work from inside an AppKit popover. The separate
+Phase 4 "Wade Suggestion" window is gone. There's no hotkey, which v1 dropped.
+
+**Tried by hand (2026-09-25):**
+- `--sample-note`: the popover opened by itself. **Do it** wrote
+  `~/Documents/Wade/2026-09-25 1234 AI in Medical Imaging.md`.
+- Sample repo suggestion: **Not helpful** stored `user_rejection` "Not helpful here."
+- A second one: **Correct…** stored `user_correction` "just show me the latest release".
+
+**Not yet seen live:**
+- The icon states with the backend running. The dashed circle, with the backend down, was
+  confirmed.
+- Whether focus stays in the app you're typing in when the popover opens by itself.
+- A real Stage 2 fire reaching the popover: it goes through the same `execution.run` path as
+  the samples, but no live fire has happened yet (see Open items).
+
 ### What the app observes
 
 Nothing is observed until onboarding is finished **and** Accessibility is granted. Revoking
@@ -459,7 +504,8 @@ equal signatures.
 
 One SQLite file, separate tables: `onboarding_facts` + `integration_opt_ins` (user-stated,
 editable in Settings → About You) and `correction_facts` (provenance-tagged, shown in
-Settings → Corrections, empty until Phase 6 writes to it). Explicit feedback only.
+Settings → Corrections). Explicit feedback only. Rejections and corrections are both
+correction facts, told apart by `provenance`: `user_rejection` or `user_correction`.
 
 ### Protocol
 

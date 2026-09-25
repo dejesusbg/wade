@@ -2,34 +2,33 @@ import AppKit
 import SwiftUI
 import WadeIPC
 
-// Menu bar residency only (CLAUDE.md §5.1): no Dock icon, no cursor-follow. Windows exist
-// only for onboarding and settings. No global hotkey in v1 — triggering is automatic.
+// Menu bar residency only (CLAUDE.md §5.1): no Dock icon, no cursor-follow. The icon and its
+// popover are AppKit (`StatusItemController`), so Wade can open the popover itself when a
+// suggestion arrives. Windows exist only for onboarding and settings. No global hotkey in v1.
 
 @main
 struct WadeApp: App {
-    @State private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        MenuBarExtra("Wade", systemImage: model.glyph) {
-            MenuContent(model: model)
-        }
+        // Everything is owned by the delegate; SwiftUI needs at least one scene.
+        Settings { EmptyView() }
+    }
+}
 
-        Window("Welcome to Wade", id: "onboarding") {
-            OnboardingView(permission: model.permission, memory: model.memory)
-        }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(model.memory.onboardingCompleted ? .suppressed : .presented)
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var model: AppModel?
+    private var windows: WindowPresenter?
+    private var statusItem: StatusItemController?
 
-        Window("Wade Suggestion", id: "suggestion") {
-            SuggestionView(engine: model.execution)
-        }
-        .windowResizability(.contentSize)
-        .defaultLaunchBehavior(.suppressed)
-
-        Settings {
-            SettingsView(permission: model.permission, memory: model.memory, execution: model.execution,
-                         integrations: model.integrations)
-        }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let model = AppModel()
+        let windows = WindowPresenter(model: model)
+        self.model = model
+        self.windows = windows
+        statusItem = StatusItemController(model: model, windows: windows)
+        if !model.memory.onboardingCompleted { windows.show(.onboarding) }
     }
 }
 
@@ -59,7 +58,7 @@ final class AppModel {
             for await message in client.messages {
                 if case .triggerFired(let trigger) = message {
                     self.lastTrigger = trigger
-                    self.execution.run(trigger)  // Phase 4: write the suggestion (shown in Phase 6)
+                    self.execution.run(trigger)  // shown in the menu-bar popover
                 }
             }
         }
@@ -101,51 +100,17 @@ final class AppModel {
         client.send(event)
     }
 
-    var glyph: String {
-        if backendState == .disconnected || !isObserving { return "circle.dashed" }
-        return lastTrigger == nil ? "circle" : "circle.fill"
+    var backendConnected: Bool { backendState == .connected }
+
+    /// One line for the popover's footer.
+    var statusLine: String {
+        if !backendConnected { return "Backend not running" }
+        if !memory.onboardingCompleted { return "Setup not finished" }
+        if !permission.isTrusted { return "Accessibility access needed" }
+        return "Watching for moments · \(eventCount) events sent"
     }
-}
 
-struct MenuContent: View {
-    let model: AppModel
-    @Environment(\.openWindow) private var openWindow
-
-    var body: some View {
-        Text(model.backendState == .connected ? "Backend: connected" : "Backend: not running")
-        if !model.memory.onboardingCompleted {
-            Text("Setup not finished")
-        } else if !model.permission.isTrusted {
-            Text("Accessibility access needed")
-            Button("Grant Accessibility Access…") { model.permission.request() }
-        } else {
-            Text("Observing · \(model.eventCount) events sent")
-            if let e = model.lastEvent {
-                Text("Last: \(e.eventType.rawValue) · \(e.appBundleId)")
-            }
-            if let t = model.lastTrigger {
-                // Placeholder until the Phase 6 popover: shows Stage 2 fires as they arrive.
-                Text("wade is \(t.mode ?? "thinking")… · \(t.jspaceConcepts.prefix(3).joined(separator: ", "))")
-            }
-        }
-        Divider()
-        Button("Show Suggestion…") { openWindow(id: "suggestion") }
-        Button("Try a Sample Suggestion") {
-            openWindow(id: "suggestion")
-            model.execution.runSample()
-        }
-        Button("Try a Sample Note Action") {
-            openWindow(id: "suggestion")
-            model.execution.runSampleNote()
-        }
-        Divider()
-        Button(model.memory.onboardingCompleted ? "Setup…" : "Finish Setup…") {
-            openWindow(id: "onboarding")
-        }
-        SettingsLink { Text("Settings…") }
-            .keyboardShortcut(",")
-        Divider()
-        Button("Quit Wade") { NSApp.terminate(nil) }
-            .keyboardShortcut("q")
+    var statusSymbol: String {
+        backendConnected && isObserving ? "eye" : "eye.slash"
     }
 }

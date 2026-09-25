@@ -1,14 +1,21 @@
 import SwiftUI
+import WadeCore
 import WadeExecution
 
-/// Phase 4 placeholder surface: shows the current suggestion streaming in. Phase 6 replaces it
-/// with the popover anchored to the menu bar icon (with accept / reject / correct).
+/// The suggestion, as shown in the menu-bar popover (CLAUDE.md §5.1, Phase 6): streamed text,
+/// proposed actions, the "why" readout, and explicit feedback that writes to the corrections
+/// store (§5.7).
 struct SuggestionView: View {
     let engine: ExecutionEngine
+    /// Called on any click inside, so an auto-opened popover doesn't close under the user.
+    var engaged: () -> Void = {}
+    @State private var correcting = false
+    @State private var correction = ""
+    @FocusState private var correctionFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let s = engine.current {
+        if let s = engine.current {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Text("wade").fontWeight(.semibold)
                     Text("is \(s.mode ?? "thinking")…").foregroundStyle(.secondary)
@@ -25,35 +32,84 @@ struct SuggestionView: View {
                         Text(s.text.isEmpty ? " " : s.text)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .font(.body)
                 ForEach(s.proposals) { proposal in
-                    ProposalRow(proposal: proposal) { engine.perform(proposal.id) }
+                    ProposalRow(proposal: proposal) { engaged(); engine.perform(proposal.id) }
                 }
-                Divider()
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Why: \(s.concepts.prefix(4).joined(separator: ", "))")
-                    if !s.providerName.isEmpty {
-                        Text("\(s.providerName)\(s.sendsDataOffDevice ? " · sent to the provider" : " · stayed on this Mac")"
-                             + timing(s))
-                    }
-                    ForEach(s.skipped, id: \.self) { Text("Skipped \($0)") }
-                    if !s.toolsRan.isEmpty { Text("Looked up: \(s.toolsRan.joined(separator: ", "))") }
+                if s.phase != .quiet, s.phase != .failed, s.status != .streaming {
+                    feedback(s)
                 }
-                .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text("No suggestion yet.").foregroundStyle(.secondary)
+                why(s)
             }
-            HStack {
-                Spacer()
-                Button("Sample: repo page") { engine.runSample() }
-                Button("Sample: save a note") { engine.runSampleNote() }
+        } else {
+            Text("Nothing to say right now. Wade speaks up when it sees a moment worth it.")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func feedback(_ s: ExecutionEngine.Suggestion) -> some View {
+        switch s.feedback {
+        case .rejected:
+            Label("Noted: Wade will keep that in mind.", systemImage: "hand.thumbsdown").font(.callout).foregroundStyle(.secondary)
+        case .corrected:
+            Label("Saved to Corrections: Wade will use it next time.", systemImage: "checkmark").font(.callout).foregroundStyle(.secondary)
+        case .accepted, nil:
+            if correcting {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("What would have helped?", text: $correction,
+                              prompt: Text("e.g. \u{201C}just the release binary next time\u{201D}"), axis: .vertical)
+                        .labelsHidden()
+                        .lineLimit(1...3)
+                        .focused($correctionFocused)
+                        .onSubmit(saveCorrection)
+                    HStack {
+                        Spacer()
+                        Button("Cancel") { correcting = false; correction = "" }
+                        Button("Save", action: saveCorrection)
+                            .buttonStyle(.borderedProminent)
+                            .disabled(correction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            } else {
+                HStack {
+                    if s.feedback == nil {  // after "Thanks" or "Do it", a correction is still welcome
+                        Button("Thanks") { engaged(); engine.accept() }
+                        Button("Not helpful") { engaged(); engine.reject() }
+                    }
+                    Button("Correct…") {
+                        engaged()
+                        NSApp.activate()  // the field needs keyboard focus; only on this click
+                        correcting = true
+                        correctionFocused = true
+                    }
+                    Spacer()
+                }
+                .controlSize(.small)
             }
         }
-        .padding(16)
-        .frame(width: 420)
-        .onAppear { NSApp.activate() }
+    }
+
+    private func saveCorrection() {
+        engine.correct(correction)
+        correcting = false
+        correction = ""
+    }
+
+    private func why(_ s: ExecutionEngine.Suggestion) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Why: \(s.concepts.prefix(4).joined(separator: ", "))")
+            if !s.providerName.isEmpty {
+                Text("\(s.providerName)\(s.sendsDataOffDevice ? " · sent to the provider" : " · stayed on this Mac")"
+                     + timing(s))
+            }
+            ForEach(s.skipped, id: \.self) { Text("Skipped \($0)") }
+            if !s.toolsRan.isEmpty { Text("Looked up: \(s.toolsRan.joined(separator: ", "))") }
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
 
     private func timing(_ s: ExecutionEngine.Suggestion) -> String {

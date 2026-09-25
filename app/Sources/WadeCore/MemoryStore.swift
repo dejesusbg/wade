@@ -32,9 +32,15 @@ public struct CorrectionFact: Identifiable, Sendable, Equatable {
     public let suggestion: String
     /// What the user said instead, e.g. "just the release binary next time".
     public let correction: String
-    /// Always "user_correction" in v1; kept so later versions can weight sources differently.
+    /// Where it came from (`Provenance`), kept so later versions can weight sources differently.
     public let provenance: String
     public let createdAt: Date
+
+    /// Both are explicit feedback on one suggestion (v1 never infers preferences passively).
+    public enum Provenance: String, Sendable {
+        case correction = "user_correction"  // the user said what would have helped
+        case rejection = "user_rejection"    // the user turned the suggestion down
+    }
 
     public init(id: Int64, suggestionId: String, suggestion: String, correction: String,
                 provenance: String, createdAt: Date) {
@@ -158,14 +164,15 @@ public final class MemoryStore {
     }
 
     @discardableResult
-    public func addCorrection(suggestionId: String, suggestion: String, correction: String, now: Date = .now) throws -> CorrectionFact {
+    public func addCorrection(suggestionId: String, suggestion: String, correction: String,
+                              provenance: CorrectionFact.Provenance = .correction, now: Date = .now) throws -> CorrectionFact {
         let ts = now.timeIntervalSince1970
         try db.execute(
-            "INSERT INTO correction_facts (suggestion_id, suggestion, correction, created_at) VALUES (?, ?, ?, ?)",
-            [.text(suggestionId), .text(suggestion), .text(correction), .real(ts)])
+            "INSERT INTO correction_facts (suggestion_id, suggestion, correction, provenance, created_at) VALUES (?, ?, ?, ?, ?)",
+            [.text(suggestionId), .text(suggestion), .text(correction), .text(provenance.rawValue), .real(ts)])
         return CorrectionFact(
             id: db.lastInsertRowID, suggestionId: suggestionId, suggestion: suggestion,
-            correction: correction, provenance: "user_correction", createdAt: Date(timeIntervalSince1970: ts))
+            correction: correction, provenance: provenance.rawValue, createdAt: Date(timeIntervalSince1970: ts))
     }
 
     public func deleteCorrection(id: Int64) throws {

@@ -37,6 +37,10 @@ import Testing
             suggestionId: "s1", suggestion: "clone the repo", correction: "just the release binary next time")
         #expect(try store.correctionFacts() == [c])
         #expect(c.provenance == "user_correction")
+        let r = try store.addCorrection(suggestionId: "s2", suggestion: "fork the repo",
+                                        correction: "Not helpful here", provenance: .rejection)
+        #expect(try store.correctionFacts().map(\.provenance) == ["user_correction", "user_rejection"])
+        #expect(r.provenance == "user_rejection")
         #expect(try store.onboardingFacts().count == 1)
     }
 

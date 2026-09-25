@@ -6,7 +6,7 @@ import SwiftUI
 struct OnboardingView: View {
     let permission: AccessibilityPermission
     let memory: MemoryModel
-    @Environment(\.dismissWindow) private var dismissWindow
+    let finish: () -> Void
 
     private enum Step: Int, CaseIterable {
         case access, integrations, facts
@@ -38,7 +38,7 @@ struct OnboardingView: View {
                     // No Return shortcut here: Return in the fact field must add the fact.
                     Button("Finish") {
                         memory.completeOnboarding()
-                        dismissWindow()
+                        finish()
                     }
                     .buttonStyle(.borderedProminent)
                 } else {
