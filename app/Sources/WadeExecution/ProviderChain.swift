@@ -37,11 +37,16 @@ public enum ProviderChain {
                     }
                     continuation.yield(.using(title: provider.displayName, offDevice: provider.sendsDataOffDevice))
                     let produced = Flag()
+                    let progressed = Flag()  // tool activity: progress for the watchdog, not "text shown"
                     let timedOut = Flag()
+                    let attemptTools = ToolBox(tools: tools.tools, runner: tools.runner) { event in
+                        progressed.set()
+                        tools.onEvent(event)
+                    }
                     // Watchdog: cancel this provider if no text arrives in time. It records that it
                     // fired, because a cancelled stream consumer ends quietly rather than throwing.
                     let attempt = Task {
-                        for try await delta in provider.generate(prompt: prompt, tools: tools) {
+                        for try await delta in provider.generate(prompt: prompt, tools: attemptTools) {
                             try Task.checkCancellation()
                             produced.set()
                             continuation.yield(.text(delta))
@@ -52,7 +57,7 @@ public enum ProviderChain {
                     let watchdog = Task {
                         try await Task.sleep(for: firstTokenTimeout)
                         if dbg { FileHandle.standardError.write(Data("[chain] watchdog fired at \(ContinuousClock.now - t0), produced=\(produced.isSet)\n".utf8)) }
-                        if !produced.isSet {
+                        if !produced.isSet && !progressed.isSet {
                             timedOut.set()
                             attempt.cancel()
                         }

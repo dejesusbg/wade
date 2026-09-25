@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 4 (execution layer) done, check-in pending before Phase 5
+## Status: Phase 5 (MCP tool layer) in progress: your folder + GitHub token, then the real end-to-end run
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -298,6 +298,53 @@ protocol:
   search, fetch, code execution), **not** the Messages API's remote MCP connector. So MCP through
   the Foundation Models route means the framework's client-side `Tool` protocol. The direct route
   could use Anthropic's connector (`mcp_servers` + `mcp_toolset`, beta `mcp-client-2025-11-20`).
+
+### MCP tool layer (Phase 5)
+
+`app/Sources/WadeTools/` runs the MCP servers for the integrations you opted into (official
+[MCP Swift SDK](https://github.com/modelcontextprotocol/swift-sdk) 0.12.1, stdio):
+
+| Integration | Server | Access |
+|---|---|---|
+| Files | official `@modelcontextprotocol/server-filesystem@2026.8.31` (via `npx`, version pinned) | only the folders you pick in Settings → Integrations; notes go in the first |
+| GitHub | official `github-mcp-server` 1.12.2 (`brew install github-mcp-server`) | your personal access token (Keychain), passed only in the server's environment |
+
+**The action rule** (user decision, enforced once in `ToolBox`, the same for every provider):
+- A tool the server explicitly marks `readOnlyHint: true` may run while a suggestion is being
+  written, to make it specific.
+- **Every other tool, unmarked ones included, never runs during composition.** Calling it
+  records a *proposed action*, shown with a **Do it** button, and it runs only on that click.
+- Servers' own labels: filesystem has 10 read-only and 4 write tools; GitHub has 26 read-only and
+  19 write tools (incl. `merge_pull_request`, `delete_file`, `push_files`: none of those are offered).
+
+**Tool selection** (`ToolSelection`). The on-device model has about a 4K-token context, and 45+
+tool schemas don't fit, so each suggestion gets a small curated set:
+- *notes moments* (selection, writing, research): the composed `save_note`
+- *github.com pages*: `get_latest_release`, `list_releases` (lookups) plus `fork_repository`,
+  `issue_write` (click-only)
+
+**Tool composition** (`ComposedTools`): `wade__save_note(title, content)` maps onto the filesystem
+server's `write_file`, with a path Wade builds itself (`<folder>/<date> <title>.md`; a title can't
+escape the folder). Raw `write_file` needs a path the model doesn't know, and the small model
+described the action instead of proposing it. With `save_note` it proposed in 5 of 5 runs.
+
+**Bridges:**
+- Foundation Models: each MCP tool becomes a `Tool` via `DynamicGenerationSchema` (on-device, and
+  Claude later).
+- Gemini: a function-calling loop that echoes the model's parts, including `thoughtSignature`.
+- Claude's direct route: no tools yet (untested without credits).
+
+**Timeout:** tool activity counts as progress, so a model busy proposing an action isn't cut off
+before its first word.
+
+**Verified:**
+- Headless (`wade-exec-check tools-e2e <folder>`): on-device model → `save_note` proposed in about
+  2s → simulated **Do it** → the filesystem server wrote the note, 5 of 5 runs.
+- In the app (`--sample-note`): Wade starts the filesystem server itself, and the suggestion
+  arrives with 1 proposal.
+
+**Build note:** `scripts/build-check.sh` signs the check tool with your Apple Development
+certificate, so a Keychain "Always Allow" survives rebuilds.
 
 ### What the app observes
 

@@ -27,7 +27,8 @@ struct WadeApp: App {
         .defaultLaunchBehavior(.suppressed)
 
         Settings {
-            SettingsView(permission: model.permission, memory: model.memory, execution: model.execution)
+            SettingsView(permission: model.permission, memory: model.memory, execution: model.execution,
+                         integrations: model.integrations)
         }
     }
 }
@@ -37,7 +38,8 @@ struct WadeApp: App {
 final class AppModel {
     let permission = AccessibilityPermission()
     let memory = MemoryModel()
-    @ObservationIgnored private(set) lazy var execution = ExecutionEngine(memory: memory)
+    @ObservationIgnored private(set) lazy var integrations = IntegrationsModel(memory: memory)
+    @ObservationIgnored private(set) lazy var execution = ExecutionEngine(memory: memory, integrations: integrations)
     private(set) var backendState = BackendClient.State.disconnected
     private(set) var lastTrigger: TriggerFired?
     private(set) var eventCount = 0
@@ -62,10 +64,21 @@ final class AppModel {
             }
         }
         syncObserver()
+        _ = integrations  // start the opted-in MCP servers
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.integrations.stop() }
+        }
         // Developer hook: `open Wade.app --args --sample-suggestion` runs the sample trigger
         // through the real execution engine (same as the menu's "Try a Sample Suggestion").
         if CommandLine.arguments.contains("--sample-suggestion") {
             Task { @MainActor [weak self] in self?.execution.runSample() }
+        }
+        if CommandLine.arguments.contains("--sample-note") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(3))  // let the MCP servers start
+                self?.execution.runSampleNote()
+            }
         }
     }
 
@@ -120,6 +133,10 @@ struct MenuContent: View {
         Button("Try a Sample Suggestion") {
             openWindow(id: "suggestion")
             model.execution.runSample()
+        }
+        Button("Try a Sample Note Action") {
+            openWindow(id: "suggestion")
+            model.execution.runSampleNote()
         }
         Divider()
         Button(model.memory.onboardingCompleted ? "Setup…" : "Finish Setup…") {

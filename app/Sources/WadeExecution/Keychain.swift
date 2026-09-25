@@ -1,16 +1,21 @@
 import Foundation
 import Security
 
-/// Cloud API keys, one per vendor, kept in the user's login Keychain (never in UserDefaults or
-/// on disk).
+/// Secrets (cloud API keys, one per vendor, plus integration tokens such as GitHub's), kept in
+/// the user's login Keychain, never in UserDefaults or on disk.
 public enum APIKeyStore {
     private static let service = "com.ricardo.wade.api-keys"
 
-    public static func read(_ vendor: Vendor) -> String? {
+    public static func read(_ vendor: Vendor) -> String? { read(account: vendor.rawValue) }
+    @discardableResult
+    public static func save(_ key: String, for vendor: Vendor) -> Bool { save(key, account: vendor.rawValue) }
+    public static func delete(_ vendor: Vendor) { delete(account: vendor.rawValue) }
+
+    public static func read(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
@@ -22,25 +27,25 @@ public enum APIKeyStore {
     }
 
     @discardableResult
-    public static func save(_ key: String, for vendor: Vendor) -> Bool {
-        delete(vendor)
+    public static func save(_ key: String, account: String) -> Bool {
+        delete(account: account)
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: account,
             kSecValueData as String: Data(trimmed.utf8),
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
         ]
         return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
-    public static func delete(_ vendor: Vendor) {
+    public static func delete(account: String) {
         SecItemDelete([
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: vendor.rawValue,
+            kSecAttrAccount as String: account,
         ] as CFDictionary)
     }
 }

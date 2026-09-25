@@ -4,9 +4,9 @@ import WadeCore
 import WadeIPC
 @testable import WadeExecution
 
-private func events(_ raw: String, _ wire: any DirectWire) -> [StreamEvent] {
+private func events(_ raw: String, _ decode: (SSEParser.Event) -> StreamEvent) -> [StreamEvent] {
     var parser = SSEParser()
-    return raw.components(separatedBy: "\n").compactMap { parser.feed($0) }.map(wire.decode)
+    return raw.components(separatedBy: "\n").compactMap { parser.feed($0) }.map(decode)
 }
 
 private func trigger(context: [String: String]? = nil) -> TriggerFired {
@@ -39,12 +39,12 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
         data: {"type":"message_stop"}
 
         """
-        #expect(events(raw, AnthropicWire()).filter { $0 != .ignored } == [.text("Clone "), .text("it."), .done(reason: "end_turn")])
+        #expect(events(raw, AnthropicWire().decode).filter { $0 != .ignored } == [.text("Clone "), .text("it."), .done(reason: "end_turn")])
     }
 
     @Test func decodesMidStreamErrorAndHTTPErrors() {
         let raw = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n"
-        #expect(events(raw, AnthropicWire()) == [.error(type: "overloaded_error", message: "Overloaded")])
+        #expect(events(raw, AnthropicWire().decode) == [.error(type: "overloaded_error", message: "Overloaded")])
         let e = AnthropicWire().httpError(status: 401, body: #"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#)
         #expect(e == .http(status: 401, type: "authentication_error", message: "invalid x-api-key"))
     }
@@ -69,19 +69,20 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
         data: {"candidates":[{"content":{"parts":[{"text":"git clone."}],"role":"model"},"finishReason":"STOP"}],"usageMetadata":{"totalTokenCount":42}}
 
         """
-        #expect(events(raw, GeminiWire()).filter { $0 != .ignored } == [.text("Clone it with "), .text("git clone.")])
+        #expect(events(raw, GeminiWire().decode).filter { $0 != .ignored } == [.text("Clone it with "), .text("git clone.")])
     }
 
     @Test func decodesErrors() {
         let raw = "data: {\"error\":{\"code\":429,\"message\":\"Quota exceeded\",\"status\":\"RESOURCE_EXHAUSTED\"}}\n\n"
-        #expect(events(raw, GeminiWire()) == [.error(type: "RESOURCE_EXHAUSTED", message: "Quota exceeded")])
+        #expect(events(raw, GeminiWire().decode) == [.error(type: "RESOURCE_EXHAUSTED", message: "Quota exceeded")])
         let e = GeminiWire().httpError(status: 400, body: #"{"error":{"code":400,"message":"API key not valid","status":"INVALID_ARGUMENT"}}"#)
         #expect(e == .http(status: 400, type: "INVALID_ARGUMENT", message: "API key not valid"))
     }
 
     @Test func requestUsesHeaderKeyAndStreamingEndpoint() throws {
         let r = try GeminiWire().request(model: "gemini-flash-latest", apiKey: "AIza-test",
-                                         prompt: ExecutionPrompt(trigger: trigger(), facts: [], corrections: []), maxTokens: 300)
+                                         prompt: ExecutionPrompt(trigger: trigger(), facts: [], corrections: []), maxTokens: 300,
+                                         tools: [MCPTool(name: "files__list_directory", description: "List", inputSchema: #"{"type":"object","properties":{"path":{"type":"string"}}}"#, readOnly: true)])
         #expect(r.url!.absoluteString.hasSuffix("/models/gemini-flash-latest:streamGenerateContent?alt=sse"))
         #expect(!r.url!.absoluteString.contains("AIza"))  // key in the header, never the URL
         #expect(r.value(forHTTPHeaderField: "x-goog-api-key") == "AIza-test")
@@ -89,6 +90,8 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
         #expect(body["systemInstruction"] != nil && body["contents"] != nil)
         let thinking = (body["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
         #expect(thinking?["thinkingLevel"] as? String == "minimal")
+        let decls = ((body["tools"] as? [[String: Any]])?.first?["functionDeclarations"] as? [[String: Any]]) ?? []
+        #expect(decls.first?["name"] as? String == "files__list_directory")
     }
 }
 
@@ -155,11 +158,12 @@ private func trigger(context: [String: String]? = nil) -> TriggerFired {
 private struct FakeProvider: ExecutionProvider {
     let displayName: String
     let sendsDataOffDevice = false
+    let supportsTools = false
     let chunks: [String]
     let failAfter: Int?  // throw after this many chunks
     var delay: Duration = .zero  // before the first chunk
 
-    func generate(prompt: ExecutionPrompt, tools: [MCPTool]) -> AsyncThrowingStream<String, Error> {
+    func generate(prompt: ExecutionPrompt, tools: ToolBox) -> AsyncThrowingStream<String, Error> {
         let (chunks, failAfter, delay) = (chunks, failAfter, delay)
         return AsyncThrowingStream { c in
           Task {
@@ -215,11 +219,71 @@ private struct FakeProvider: ExecutionProvider {
         #expect(r.events.contains(.text("fast")) && !r.events.contains(.text("late")) && !r.error)
     }
 
+    @Test func toolActivityCountsAsProgressForTheTimeout() async {
+        // A provider that proposes an action right away, then writes text after the timeout.
+        struct Proposer: ExecutionProvider {
+            let displayName = "P"; let sendsDataOffDevice = false; let supportsTools = true
+            func generate(prompt: ExecutionPrompt, tools: ToolBox) -> AsyncThrowingStream<String, Error> {
+                AsyncThrowingStream { c in
+                    Task {
+                        _ = await tools.handle("wade__save_note", argumentsJSON: "{}")
+                        try? await Task.sleep(for: .milliseconds(400))
+                        c.yield("Save it?"); c.finish()
+                    }
+                }
+            }
+        }
+        let save = MCPTool(name: "wade__save_note", description: "Save", readOnly: false)
+        var got: [ProviderChain.Event] = []
+        let stream = ProviderChain.run([a], prompt: prompt, tools: ToolBox(tools: [save], runner: nil, onEvent: { _ in }),
+                                       firstTokenTimeout: .milliseconds(200)) { _ in .success(Proposer()) }
+        do { for try await e in stream { got.append(e) } } catch { Issue.record("chain threw: \(error) events: \(got)") }
+        #expect(got.contains(.text("Save it?")))
+    }
+
     @Test func noSwitchingMidSentence() async {
         let r = await collect { d in
             .success(FakeProvider(displayName: d.id, chunks: ["half "], failAfter: d.id == a.id ? 1 : nil))
         }
         #expect(r.error)
         #expect(r.events.filter { if case .using = $0 { true } else { false } }.count == 1)
+    }
+}
+
+
+/// Records calls; never touches a real server.
+private final class RecordingRunner: ToolRunner, @unchecked Sendable {
+    var calls: [String] = []
+    func call(_ tool: MCPTool, argumentsJSON: String) async throws -> String {
+        calls.append(tool.name)
+        return "listing"
+    }
+}
+
+@Suite struct ActionRuleTests {
+    private let read = MCPTool(name: "files__list_directory", description: "List", readOnly: true, integration: "filesystem")
+    private let write = MCPTool(name: "wade__save_note", description: "Save", readOnly: false, integration: "filesystem")
+    private let unmarked = MCPTool(name: "github__mystery", description: "?", integration: "github")
+
+    @Test func readOnlyRunsWriteIsOnlyProposed() async {
+        let runner = RecordingRunner()
+        final class Events: @unchecked Sendable { var list: [ExecutionEvent] = [] }
+        let events = Events()
+        let box = ToolBox(tools: [read, write, unmarked], runner: runner) { events.list.append($0) }
+
+        #expect(await box.handle(read.name, argumentsJSON: "{}") == "listing")
+        let w = await box.handle(write.name, argumentsJSON: #"{"title":"t"}"#)
+        let u = await box.handle(unmarked.name, argumentsJSON: "{}")
+        #expect(w.contains("Not run yet") && u.contains("Not run yet"))
+        #expect(runner.calls == [read.name])  // the write and the unmarked tool never ran
+        #expect(events.list.filter { if case .proposed = $0 { true } else { false } }.count == 2)
+        #expect(await box.handle("files__rm_rf", argumentsJSON: "{}").hasPrefix("Error: unknown tool"))
+    }
+
+    @Test func toolPromptPutsTheActionFirst() {
+        let p = ExecutionPrompt(trigger: trigger(), facts: [], corrections: [])
+        #expect(p.instructions(toolsAvailable: true).contains("CALL THAT TOOL NOW"))
+        #expect(!p.instructions(toolsAvailable: false).contains("tools"))
+        #expect(p.messageWithTools.contains("call it first"))
     }
 }

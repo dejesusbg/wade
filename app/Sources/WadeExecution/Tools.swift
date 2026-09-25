@@ -61,8 +61,8 @@ public enum ExecutionEvent: Sendable, Equatable {
 /// so the action rule is enforced in exactly one place.
 public struct ToolBox: Sendable {
     public let tools: [MCPTool]
-    let runner: (any ToolRunner)?
-    let onEvent: @Sendable (ExecutionEvent) -> Void
+    public let runner: (any ToolRunner)?
+    public let onEvent: @Sendable (ExecutionEvent) -> Void
 
     public init(tools: [MCPTool], runner: (any ToolRunner)?, onEvent: @escaping @Sendable (ExecutionEvent) -> Void) {
         self.tools = tools

@@ -1,6 +1,7 @@
 import Foundation
 import WadeExecution
 import WadeIPC
+import WadeTools
 import os
 
 /// Runs the execution stage for each Stage 2 fire and exposes the streaming text to SwiftUI.
@@ -17,6 +18,29 @@ final class ExecutionEngine {
         case failed(String)
     }
 
+    /// An action the model proposed; runs only when the user clicks "Do it".
+    struct Proposal: Identifiable {
+        enum State: Equatable { case pending, running, done(String), failed(String) }
+        let action: ProposedAction
+        var state = State.pending
+        var id: String { action.id }
+
+        /// Plain-language description for the button's label.
+        var summary: String {
+            let args = (try? JSONSerialization.jsonObject(with: Data(action.argumentsJSON.utf8)) as? [String: Any]) ?? [:]
+            switch action.tool.name {
+            case ComposedTools.saveNoteName:
+                return "Save note \u{201C}\(args["title"] as? String ?? "Note")\u{201D}"
+            case "github__fork_repository":
+                return "Fork \(args["owner"] as? String ?? "?")/\(args["repo"] as? String ?? "?") to your account"
+            case "github__issue_write":
+                return "Create issue \u{201C}\(args["title"] as? String ?? "…")\u{201D} in \(args["owner"] as? String ?? "?")/\(args["repo"] as? String ?? "?")"
+            default:
+                return "Run \(action.tool.name)"
+            }
+        }
+    }
+
     struct Suggestion: Identifiable {
         let id: String
         let mode: String?
@@ -24,6 +48,8 @@ final class ExecutionEngine {
         var providerName = ""
         var sendsDataOffDevice = false
         var skipped: [String] = []  // providers tried first and why they didn't run
+        var proposals: [Proposal] = []
+        var toolsRan: [String] = []  // read-only tools the model used while composing
         var text = ""
         var status = Status.streaming
         let startedAt = Date()
@@ -54,14 +80,16 @@ final class ExecutionEngine {
     }
 
     private let memory: MemoryModel
+    private let integrations: IntegrationsModel
     private var task: Task<Void, Never>?
     private let log = Logger(subsystem: "wade", category: "execution")
     private static let primaryKey = "execution.primary"
     private static let fallbackKey = "execution.fallback"
     private static let timeoutKey = "execution.timeout"
 
-    init(memory: MemoryModel) {
+    init(memory: MemoryModel, integrations: IntegrationsModel) {
         self.memory = memory
+        self.integrations = integrations
         let d = UserDefaults.standard
         primaryID = d.string(forKey: Self.primaryKey).flatMap { ProviderCatalog.find($0)?.id }
             ?? ProviderCatalog.defaultPrimaryID
@@ -98,9 +126,17 @@ final class ExecutionEngine {
         current = Suggestion(id: trigger.suggestionId, mode: trigger.mode, concepts: trigger.jspaceConcepts)
         log.info("execution: \(chain.map(\.id).joined(separator: " → "), privacy: .public) for \(trigger.kind ?? "?", privacy: .public)/\(trigger.mode ?? "?", privacy: .public)")
 
+        let manager = integrations.manager
+        let timeout = Duration.milliseconds(Int(timeoutSeconds * 1000))
+        let onToolEvent: @Sendable (ExecutionEvent) -> Void = { [weak self] event in
+            Task { @MainActor in self?.record(event) }
+        }
         task = Task { [weak self] in
-            let timeout = Duration.milliseconds(Int((self?.timeoutSeconds ?? 2.5) * 1000))
-            let stream = ProviderChain.run(chain, prompt: prompt, firstTokenTimeout: timeout) { descriptor in
+            // Tools for this moment: a small curated subset of what the opted-in servers offer.
+            let offered = ToolSelection.pick(from: await manager.allTools(), mode: trigger.mode,
+                                             kind: trigger.kind, url: trigger.context?["url"])
+            let tools = ToolBox(tools: offered, runner: manager, onEvent: onToolEvent)
+            let stream = ProviderChain.run(chain, prompt: prompt, tools: tools, firstTokenTimeout: timeout) { descriptor in
                 descriptor.makeProvider(key: APIKeyStore.read(descriptor.vendor))
             }
             do {
@@ -129,6 +165,56 @@ final class ExecutionEngine {
         }
     }
 
+    private func record(_ event: ExecutionEvent) {
+        guard var s = current else { return }
+        switch event {
+        case .proposed(let action):
+            // One proposal per tool: a model retrying the same call shouldn't stack buttons.
+            s.proposals.removeAll { $0.action.tool.name == action.tool.name && $0.state == .pending }
+            s.proposals.append(Proposal(action: action))
+        case .toolRan(let name, let ok):
+            s.toolsRan.append(ok ? name : "\(name) (failed)")
+        case .text:
+            break
+        }
+        current = s
+    }
+
+    /// The user clicked "Do it": run the proposed action through its MCP server.
+    func perform(_ proposalID: String) {
+        guard let index = current?.proposals.firstIndex(where: { $0.id == proposalID }),
+              let action = current?.proposals[index].action, current?.proposals[index].state == .pending else { return }
+        setProposal(proposalID, .running)
+        log.info("user accepted \(action.tool.name, privacy: .public)")
+        let manager = integrations.manager
+        Task { [weak self] in
+            do {
+                let result = try await manager.call(action.tool, argumentsJSON: action.argumentsJSON)
+                self?.setProposal(proposalID, .done(String(result.prefix(300))))
+            } catch {
+                self?.setProposal(proposalID, .failed(error.localizedDescription))
+            }
+        }
+    }
+
+    private func setProposal(_ id: String, _ state: Proposal.State) {
+        guard var s = current, let i = s.proposals.firstIndex(where: { $0.id == id }) else { return }
+        s.proposals[i].state = state
+        current = s
+    }
+
+    /// A made-up selection moment shaped like the UX demo's "save to notes", to exercise the
+    /// tool path (proposal + Do it) without waiting for a real Stage 2 fire.
+    func runSampleNote() {
+        run(TriggerFired(
+            suggestionId: "sample-note-\(UUID().uuidString.prefix(8))", gateScore: 0,
+            jspaceConcepts: ["save", "annotate"],
+            tkgDigest: "In Safari ('Frontiers | AI and digital accessibility', frontiersin.org) for 40s.",
+            timestamp: Date().timeIntervalSince1970, mode: "researching", kind: "selection",
+            context: ["app": "Safari", "url": "https://www.frontiersin.org/articles/10.3389/frai.2024.00001/full",
+                      "selection": "AI is already being used to analyze medical images and detect diseases such as cancer, which could improve accessibility of diagnosis for people with disabilities."]))
+    }
+
     /// A made-up trigger shaped like the UX demo's "code fast" moment, to test streaming end to
     /// end without waiting for a real Stage 2 fire.
     func runSample() {
@@ -151,7 +237,7 @@ final class ExecutionEngine {
         c.status = status
         c.finishedAfter = Date().timeIntervalSince(c.startedAt)
         current = c
-        log.info("execution done: \(String(describing: status), privacy: .public) via \(c.providerName, privacy: .public) first token \(c.firstTokenAfter ?? -1)s total \(c.finishedAfter ?? -1)s skipped \(c.skipped.count)")
+        log.info("execution done: \(String(describing: status), privacy: .public) via \(c.providerName, privacy: .public) first token \(c.firstTokenAfter ?? -1)s total \(c.finishedAfter ?? -1)s skipped \(c.skipped.count) proposals \(c.proposals.count) tools-ran \(c.toolsRan.count)")
     }
 
     private func isNothing(_ text: String) -> Bool {

@@ -5,6 +5,7 @@ struct SettingsView: View {
     let permission: AccessibilityPermission
     let memory: MemoryModel
     let execution: ExecutionEngine
+    let integrations: IntegrationsModel
 
     var body: some View {
         TabView {
@@ -43,6 +44,9 @@ struct SettingsView: View {
                     }
                 }
                 .formStyle(.grouped)
+            }
+            Tab("Integrations", systemImage: "puzzlepiece.extension") {
+                IntegrationsSettingsView(memory: memory, integrations: integrations)
             }
             Tab("Suggestions", systemImage: "text.bubble") {
                 ExecutionSettingsView(engine: execution)

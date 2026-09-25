@@ -28,6 +28,9 @@ struct SuggestionView: View {
                     }
                 }
                 .font(.body)
+                ForEach(s.proposals) { proposal in
+                    ProposalRow(proposal: proposal) { engine.perform(proposal.id) }
+                }
                 Divider()
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Why: \(s.concepts.prefix(4).joined(separator: ", "))")
@@ -36,6 +39,7 @@ struct SuggestionView: View {
                              + timing(s))
                     }
                     ForEach(s.skipped, id: \.self) { Text("Skipped \($0)") }
+                    if !s.toolsRan.isEmpty { Text("Looked up: \(s.toolsRan.joined(separator: ", "))") }
                 }
                 .font(.caption).foregroundStyle(.secondary)
             } else {
@@ -43,7 +47,8 @@ struct SuggestionView: View {
             }
             HStack {
                 Spacer()
-                Button("Try a sample suggestion") { engine.runSample() }
+                Button("Sample: repo page") { engine.runSample() }
+                Button("Sample: save a note") { engine.runSampleNote() }
             }
         }
         .padding(16)
@@ -55,6 +60,108 @@ struct SuggestionView: View {
         guard let first = s.firstTokenAfter else { return "" }
         let total = s.finishedAfter.map { String(format: ", done %.1fs", $0) } ?? ""
         return String(format: " · first words %.1fs", first) + total
+    }
+}
+
+/// A proposed action and its "Do it" button. Nothing runs until that click.
+private struct ProposalRow: View {
+    let proposal: ExecutionEngine.Proposal
+    let perform: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Image(systemName: "bolt.circle")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(proposal.summary)
+                switch proposal.state {
+                case .done(let result): Text(result).font(.caption).foregroundStyle(.green).lineLimit(2)
+                case .failed(let message): Text(message).font(.caption).foregroundStyle(.red).lineLimit(3)
+                default: EmptyView()
+                }
+            }
+            Spacer()
+            switch proposal.state {
+            case .pending: Button("Do it", action: perform).buttonStyle(.borderedProminent)
+            case .running: ProgressView().controlSize(.small)
+            case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// Settings → Integrations: which MCP servers run, with what access.
+struct IntegrationsSettingsView: View {
+    let memory: MemoryModel
+    let integrations: IntegrationsModel
+    @State private var tokenDraft = ""
+
+    var body: some View {
+        Form {
+            Section {
+                toggle("filesystem", "Files")
+                if memory.enabledIntegrations.contains("filesystem") {
+                    ForEach(integrations.folders, id: \.self) { folder in
+                        HStack {
+                            Image(systemName: folder == integrations.notesFolder ? "note.text" : "folder")
+                            Text(folder).lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Button("Remove", systemImage: "minus.circle") { integrations.removeFolder(folder) }
+                                .labelStyle(.iconOnly).buttonStyle(.borderless)
+                        }
+                    }
+                    Button("Add Folder…") { integrations.addFolders() }
+                    status("filesystem")
+                }
+            } header: {
+                Text("Files")
+            } footer: {
+                Text("Wade can read and write only inside these folders. Notes are saved in the first one. Writing anything always waits for your \"Do it\".")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
+                toggle("github", "GitHub")
+                if memory.enabledIntegrations.contains("github") {
+                    if integrations.hasGitHubToken {
+                        LabeledContent("Token") {
+                            HStack {
+                                Text("Saved in Keychain").foregroundStyle(.secondary)
+                                Button("Remove") { integrations.removeGitHubToken() }
+                            }
+                        }
+                    } else {
+                        HStack {
+                            SecureField("Personal access token", text: $tokenDraft).labelsHidden()
+                            Button("Save") { integrations.saveGitHubToken(tokenDraft); tokenDraft = "" }
+                                .disabled(tokenDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    status("github")
+                }
+            } header: {
+                Text("GitHub")
+            } footer: {
+                Text("Lookups (releases, issues) may run while Wade writes a suggestion. Anything that changes GitHub (fork, create an issue) always waits for your \"Do it\".")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func toggle(_ id: String, _ title: String) -> some View {
+        Toggle(title, isOn: Binding(get: { memory.enabledIntegrations.contains(id) },
+                                    set: { memory.setIntegration(id, enabled: $0) }))
+    }
+
+    @ViewBuilder
+    private func status(_ id: String) -> some View {
+        if let state = integrations.statuses[id] {
+            Label(state, systemImage: state.hasPrefix("connected") ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .font(.caption)
+                .foregroundStyle(state.hasPrefix("connected") ? .green : .orange)
+        }
     }
 }
 
