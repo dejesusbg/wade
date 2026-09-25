@@ -49,7 +49,7 @@ public enum ComposedTools {
     static func datePrefix(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd HHmm"
+        f.dateFormat = "yyyy-MM-dd HHmmss"  // seconds: two notes with one title in the same minute must not overwrite each other
         return f.string(from: date)
     }
 }

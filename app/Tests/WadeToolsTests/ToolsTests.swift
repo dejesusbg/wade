@@ -46,6 +46,16 @@ private func tool(_ name: String, readOnly: Bool = true, integration: String = "
         #expect(args["content"] == "# AI in imaging\n\nQuote\n")
     }
 
+    @Test func sameTitleInTheSameMinuteDoesNotOverwrite() throws {
+        func path(_ t: TimeInterval) throws -> String {
+            let (_, json) = try ComposedTools.expand(
+                ComposedTools.saveNote(), argumentsJSON: #"{"title":"Same","content":"x"}"#,
+                notesFolder: "/n", now: Date(timeIntervalSince1970: t))
+            return (try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: String])["path"]!
+        }
+        #expect(try path(1_790_000_000) != path(1_790_000_020))
+    }
+
     @Test func titlesCannotEscapeTheFolder() throws {
         #expect(ComposedTools.safeFileName("../../etc/passwd") == "etc passwd")
         #expect(ComposedTools.safeFileName("a/b\\c:d") == "a b c d")

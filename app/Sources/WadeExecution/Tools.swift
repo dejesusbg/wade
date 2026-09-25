@@ -25,6 +25,12 @@ public struct MCPTool: Sendable, Hashable {
         self.integration = integration
     }
 
+    /// "github__fork_repository" → "fork repository"; "wade__save_note" → "save note".
+    public var actionPhrase: String {
+        let base = name.components(separatedBy: "__").last ?? name
+        return base.replacingOccurrences(of: "_", with: " ")
+    }
+
     /// The schema as a JSON object (for wire formats that embed it).
     public var schemaObject: [String: Any] {
         (try? JSONSerialization.jsonObject(with: Data(inputSchema.utf8)) as? [String: Any]) ?? ["type": "object"]
@@ -80,7 +86,13 @@ public struct ToolBox: Sendable {
         guard let tool = tool(named: name) else { return "Error: unknown tool \(name)." }
         if !tool.readOnly {
             onEvent(.proposed(ProposedAction(tool: tool, argumentsJSON: argumentsJSON)))
-            return "Not run yet: proposed to the user, who must click \"Do it\" first. Describe this action in your suggestion."
+            // Name the exact action: small models otherwise describe a neighbouring one (e.g. the
+            // text said "clone" while the button forked, 5 of 5 runs).
+            return """
+                Not run yet. The user now sees a "Do it" button for exactly this action: \(tool.actionPhrase) \
+                \(argumentsJSON). Write ONE sentence offering this same action (say "\(tool.actionPhrase)", \
+                not a different verb), e.g. "\(tool.actionPhrase.prefix(1).uppercased() + tool.actionPhrase.dropFirst()) …?"
+                """
         }
         guard let runner else { return "Error: tools are unavailable." }
         do {
