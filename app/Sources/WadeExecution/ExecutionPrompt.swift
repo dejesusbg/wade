@@ -32,7 +32,23 @@ public struct ExecutionPrompt: Sendable, Equatable {
     }
 
     /// System-level instructions: stable across suggestions (cache-friendly for cloud providers).
-    public var instructions: String {
+    public var instructions: String { instructions(toolsAvailable: false) }
+
+    /// Instructions, plus how to use tools when the provider offers some for this suggestion.
+    public func instructions(toolsAvailable: Bool) -> String {
+        guard toolsAvailable else { return baseInstructions }
+        return baseInstructions + " " + Self.toolGuidance
+    }
+
+    static let toolGuidance = """
+        You have tools. Step 1: if one of your tools would do the helpful thing itself (for \
+        example save a note, create an issue), CALL THAT TOOL NOW with complete arguments. It will \
+        not run until the user clicks "Do it", so calling it is safe and is how you offer it. You \
+        may also call a read-only tool first to be more specific. Step 2: write the one-sentence \
+        offer, e.g. "Save this paragraph to your notes?". Never claim an action already happened.
+        """
+
+    private var baseInstructions: String {
         """
         You are Wade, a quiet assistant in the user's Mac menu bar. Something on their screen \
         suggests help may be welcome right now. Write ONE short, concrete suggestion: at most two \
@@ -78,5 +94,12 @@ public struct ExecutionPrompt: Sendable, Equatable {
 
         parts.append("Write the suggestion now, or \(Self.nothing).")
         return parts.joined(separator: "\n\n")
+    }
+
+    /// The message for a provider that has tools: the action comes first.
+    public var messageWithTools: String {
+        message.replacingOccurrences(
+            of: "Write the suggestion now, or \(Self.nothing).",
+            with: "If a tool would do the helpful thing, call it first (it only runs when the user agrees). Then write the one-sentence offer, or \(Self.nothing).")
     }
 }

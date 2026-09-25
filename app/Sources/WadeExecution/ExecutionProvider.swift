@@ -4,7 +4,8 @@ import Foundation
 ///
 /// Every backend is an interchangeable implementation of this one protocol, the fallback
 /// included; nothing is special-cased. Implementations yield *text deltas* (new text only), so
-/// the UI appends without caring which provider is running.
+/// the UI appends without caring which provider is running. Tool activity (a read-only tool ran,
+/// an action was proposed) is reported through the `ToolBox`, the same way for every provider.
 ///
 /// Deviation from the brief's sketch (`AsyncStream<String>`): the stream is *throwing*, so a
 /// missing key, a rate limit or a network failure reaches the UI instead of silently ending the
@@ -17,17 +18,9 @@ public protocol ExecutionProvider: Sendable {
     var displayName: String { get }
     /// True when prompts leave the Mac (sent to a cloud API). Surfaced in Settings.
     var sendsDataOffDevice: Bool { get }
-    func generate(prompt: ExecutionPrompt, tools: [MCPTool]) -> AsyncThrowingStream<String, Error>
-}
-
-/// Placeholder for Phase 5's MCP tool layer: accepted by every provider now, used by none yet.
-public struct MCPTool: Sendable, Hashable {
-    public let name: String
-    public let description: String
-    public init(name: String, description: String) {
-        self.name = name
-        self.description = description
-    }
+    /// Whether this provider can call tools. Those that can't simply write text.
+    var supportsTools: Bool { get }
+    func generate(prompt: ExecutionPrompt, tools: ToolBox) -> AsyncThrowingStream<String, Error>
 }
 
 public enum ExecutionError: LocalizedError, Equatable {

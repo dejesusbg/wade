@@ -1,6 +1,7 @@
 import Foundation
 import WadeExecution
 import WadeIPC
+import WadeTools
 
 // Headless Phase 4 check: stream the sample "repo page" suggestion through one catalog entry and
 // print deltas as they arrive, with time to first token and total time. Keys come from Wade's
@@ -52,6 +53,57 @@ if arg == "gemini-raw" {
     for try await line in bytes.lines {
         out(String(format: "[%5.2fs] %@\n", Date().timeIntervalSince(t0), String(line.prefix(300))))
     }
+    exit(0)
+}
+
+if arg == "tools-e2e" {
+    // Phase 5 end to end, headless: real filesystem MCP server on a scratch folder, a selection
+    // moment, the chosen provider composes with tools, then a simulated "Do it" click.
+    //   wade-exec-check tools-e2e <folder> [catalog id]
+    let rest = Array(CommandLine.arguments.dropFirst(2))
+    guard let folder = rest.first else { out("usage: tools-e2e <folder> [id]\n"); exit(2) }
+    let manager = MCPManager()
+    await manager.apply([MCPServerSpec.filesystem(folders: [folder])].compactMap { $0 }, notesFolder: folder)
+    out("servers: \(await manager.statuses.map { "\($0.integration): \($0.state)" })\n")
+
+    let trigger = TriggerFired(
+        suggestionId: "e2e", gateScore: 0, jspaceConcepts: ["save", "annotate"],
+        tkgDigest: "In Safari ('Frontiers | AI and digital accessibility', frontiersin.org) for 40s.",
+        timestamp: 0, mode: "researching", kind: "selection",
+        context: ["app": "Safari", "url": "https://www.frontiersin.org/articles/10.3389/frai.2024.00001/full",
+                  "selection": "AI is already being used to analyze medical images and detect diseases such as cancer, which could improve accessibility of diagnosis for people with disabilities."])
+    let offered = ToolSelection.pick(from: await manager.allTools(), mode: trigger.mode, kind: trigger.kind, url: trigger.context?["url"])
+    out("offered: \(offered.map { "\($0.name)\($0.readOnly ? "" : "*")" }.joined(separator: ", "))  (* = runs only on click)\n")
+
+    final class Box: @unchecked Sendable { var proposals: [ProposedAction] = []; var ran: [String] = [] }
+    let box = Box()
+    let tools = ToolBox(tools: offered, runner: manager) { event in
+        switch event {
+        case .proposed(let p): box.proposals.append(p)
+        case .toolRan(let name, let ok): box.ran.append("\(name)\(ok ? "" : " (failed)")")
+        case .text: break
+        }
+    }
+    let id = rest.count > 1 ? rest[1] : "apple.on-device"
+    guard let d = ProviderCatalog.find(id) else { out("unknown id\n"); exit(2) }
+    let prompt = ExecutionPrompt(trigger: trigger, facts: [], corrections: [])
+    let t0 = Date()
+    out("\n--- suggestion (\(d.title)):\n")
+    do {
+        for try await e in ProviderChain.run([d], prompt: prompt, tools: tools, firstTokenTimeout: .seconds(20),
+                                             resolve: { $0.makeProvider(key: APIKeyStore.read($0.vendor)) }) {
+            if case .text(let t) = e { out(t) }
+        }
+    } catch { out("\nFAILED: \(error.localizedDescription)") }
+    out(String(format: "\n--- %.1fs · read-only tools ran: %@ · proposed: %d\n", Date().timeIntervalSince(t0),
+               box.ran.isEmpty ? "none" : box.ran.joined(separator: ", "), box.proposals.count))
+    for p in box.proposals {
+        out("PROPOSED \(p.tool.name) \(p.argumentsJSON.prefix(300))\n")
+        out("simulating the user's click on Do it…\n")
+        do { out("RESULT: \(try await manager.call(p.tool, argumentsJSON: p.argumentsJSON).prefix(300))\n") }
+        catch { out("ACTION FAILED: \(error.localizedDescription)\n") }
+    }
+    await manager.stopAll()
     exit(0)
 }
 

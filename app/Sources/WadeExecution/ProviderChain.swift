@@ -20,6 +20,7 @@ public enum ProviderChain {
     public static let defaultFirstTokenTimeout: Duration = .milliseconds(2500)
 
     public static func run(_ chain: [ProviderDescriptor], prompt: ExecutionPrompt,
+                           tools: ToolBox = .none,
                            firstTokenTimeout: Duration = defaultFirstTokenTimeout,
                            resolve: @escaping Resolver) -> AsyncThrowingStream<Event, Error> {
         AsyncThrowingStream { continuation in
@@ -40,7 +41,7 @@ public enum ProviderChain {
                     // Watchdog: cancel this provider if no text arrives in time. It records that it
                     // fired, because a cancelled stream consumer ends quietly rather than throwing.
                     let attempt = Task {
-                        for try await delta in provider.generate(prompt: prompt, tools: []) {
+                        for try await delta in provider.generate(prompt: prompt, tools: tools) {
                             try Task.checkCancellation()
                             produced.set()
                             continuation.yield(.text(delta))

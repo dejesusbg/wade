@@ -23,6 +23,9 @@ public struct AFMProvider: ExecutionProvider {
         return false
     }
 
+    /// Foundation Models runs tool calls itself (through our `MCPBridgeTool`s).
+    public var supportsTools: Bool { true }
+
     public init(backend: Backend, displayName: String) {
         self.backend = backend
         self.displayName = displayName
@@ -39,13 +42,26 @@ public struct AFMProvider: ExecutionProvider {
         }
     }
 
-    public func generate(prompt: ExecutionPrompt, tools: [MCPTool]) -> AsyncThrowingStream<String, Error> {
+    public func generate(prompt: ExecutionPrompt, tools: ToolBox) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 do {
-                    let session = try makeSession(instructions: prompt.instructions)
+                    // A tool whose schema can't be expressed is left out rather than failing the
+                    // whole suggestion.
+                    var bridged: [any Tool] = []
+                    for tool in tools.tools {
+                        do { bridged.append(try MCPBridgeTool(tool, box: tools)) } catch {
+                            if ProcessInfo.processInfo.environment["WADE_DEBUG_CHAIN"] == "1" {
+                                FileHandle.standardError.write(Data("[afm] tool \(tool.name) not bridged: \(error)\n".utf8))
+                            }
+                        }
+                    }
+                    if ProcessInfo.processInfo.environment["WADE_DEBUG_CHAIN"] == "1" {
+                        FileHandle.standardError.write(Data("[afm] bridged \(bridged.count)/\(tools.tools.count) tools\n".utf8))
+                    }
+                    let session = try makeSession(instructions: prompt.instructions(toolsAvailable: !bridged.isEmpty), tools: bridged)
                     var differ = SnapshotDiffer()
-                    for try await snapshot in session.streamResponse(to: prompt.message) {
+                    for try await snapshot in session.streamResponse(to: bridged.isEmpty ? prompt.message : prompt.messageWithTools) {
                         let delta = differ.delta(for: snapshot.content)
                         if !delta.isEmpty { continuation.yield(delta) }
                     }
@@ -58,17 +74,17 @@ public struct AFMProvider: ExecutionProvider {
         }
     }
 
-    private func makeSession(instructions: String) throws -> LanguageModelSession {
+    private func makeSession(instructions: String, tools: [any Tool]) throws -> LanguageModelSession {
         switch backend {
         case .onDevice:
             if let reason = Self.onDeviceUnavailableReason { throw ExecutionError.modelUnavailable(reason) }
-            return LanguageModelSession(model: SystemLanguageModel.default, instructions: instructions)
+            return LanguageModelSession(model: SystemLanguageModel.default, tools: tools, instructions: instructions)
         case .claude(let model, let apiKey):
             guard let apiKey, !apiKey.isEmpty else { throw ExecutionError.missingAPIKey("Anthropic Claude") }
             // `.apiKey` is the package's development mode; shipping would use `.appAttest` or
             // `.proxied` so no key lives in the app (see README, "Execution").
             let claude = ClaudeLanguageModel(name: model, auth: .apiKey(apiKey), timeout: 60)
-            return LanguageModelSession(model: claude, instructions: instructions)
+            return LanguageModelSession(model: claude, tools: tools, instructions: instructions)
         }
     }
 }
