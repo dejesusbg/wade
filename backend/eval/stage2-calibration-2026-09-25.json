@@ -1,0 +1,50 @@
+{
+  "config": {
+    "rule": {
+      "name": "zscore",
+      "t": 0.0,
+      "m": 0.0,
+      "k": 4.0,
+      "baseline": {
+        "mean": {
+          "coding": 0.0008341111111111111,
+          "comparing": 0.0,
+          "explaining": 0.00727654074074074,
+          "fixing": 0.0016134444444444447,
+          "researching": 0.002169059259259259,
+          "sharing": 0.004664651851851852,
+          "writing": 0.005861274074074074
+        },
+        "std": {
+          "coding": 0.004334168470806521,
+          "comparing": 0.0,
+          "explaining": 0.008228826562539355,
+          "fixing": 0.0036411905007241938,
+          "researching": 0.002930889850075631,
+          "sharing": 0.004666632026367161,
+          "writing": 0.00907792837891793
+        },
+        "min_std": 0.002
+      }
+    },
+    "layers": null,
+    "prompt": "v3",
+    "positions": 1,
+    "k": 16
+  },
+  "lens": "learned",
+  "lens_file": "jlens-learned.npz",
+  "chosen_by": "leave-one-family-out CV F0.5 on the calibration half (criterion added after the first held-out look)",
+  "calibration": {
+    "f0.5": 0.8333333333333334,
+    "precision": 0.9375,
+    "recall": 0.5769230769230769
+  },
+  "held_out": {
+    "f0.5": 0.7936507936507935,
+    "precision": 0.9090909090909091,
+    "recall": 0.5263157894736842,
+    "mode_accuracy": 0.7
+  },
+  "saved": "2026-09-25 15:18"
+}

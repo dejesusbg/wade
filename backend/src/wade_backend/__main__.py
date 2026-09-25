@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 from . import protocol
+from .research_log import DEFAULT_PATH as EVAL_LOG_PATH
+from .research_log import ResearchLog, entry
 from .server import BackendServer
 from .stage2.runner import Stage2Runner, new_suggestion_id
 from .tkg import CheckRequest, Stage1
@@ -16,11 +18,23 @@ from .tkg import CheckRequest, Stage1
 log = logging.getLogger("wade_backend")
 
 
+def explanation_order(concepts: list[tuple[str, float]]) -> list[str]:
+    """J-space concepts for the "why" line: anchor-family words first (the ones that explain
+    the decision), then the rest by weight. Task-framing tokens that sit on every check
+    ("prompt", 念头 "thought") stay in the list but no longer lead it."""
+    from .stage2 import anchors
+
+    family = [w for w, _ in concepts if anchors.family_of(w) not in (None, "null")]
+    return family + [w for w, _ in concepts if w not in family]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Wade backend (TKG gate + J-lens trigger)")
     parser.add_argument("--socket", type=Path, default=None, help="UDS path (default: $WADE_SOCKET_PATH or ~/Library/Application Support/Wade/wade.sock)")
     parser.add_argument("--record", type=Path, default=None, metavar="FILE",
                         help="append every raw tkg_event to FILE as JSON lines (includes window titles; off by default)")
+    parser.add_argument("--eval-log", type=Path, nargs="?", const=EVAL_LOG_PATH, default=None, metavar="FILE",
+                        help=f"append every check and Stage 2 decision to FILE (no screen text; default {EVAL_LOG_PATH})")
     parser.add_argument("-v", "--verbose", action="store_true", help="log every event and gate score")
     parser.add_argument("--stage1-only", action="store_true", help="don't load the Stage 2 model")
     args = parser.parse_args()
@@ -30,6 +44,9 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    research = ResearchLog(args.eval_log) if args.eval_log else None
+    if research:
+        log.info("research log on: %s (no screen text)", research.path)
     loop_ref: dict[str, asyncio.AbstractEventLoop] = {}
     server: BackendServer  # assigned below; referenced from Stage 2 results
 
@@ -39,12 +56,16 @@ def main() -> None:
         concepts = ", ".join(f"{w} {c:.3f}" for w, c in result.concepts[:5])
         log.info("STAGE2 %s kind=%s mode=%s %.0fms | %s", "FIRE" if result.fire else "quiet",
                  check.kind, result.mode, result.latency_ms, concepts)
-        if not (result.fire and check.surface):
+        surfaced = result.fire and check.surface
+        suggestion_id = new_suggestion_id() if surfaced else None
+        if research:
+            research.write(entry(check, result, suggestion_id, runner.config_label if runner else ""))
+        if not surfaced:
             return
         message = protocol.trigger_fired(
-            suggestion_id=new_suggestion_id(),
+            suggestion_id=suggestion_id,
             gate_score=check.score if check.score is not None else 0.0,
-            jspace_concepts=[w for w, _ in result.concepts],
+            jspace_concepts=explanation_order(result.concepts),
             tkg_digest=check.digest,
             timestamp=time.time(),
             mode=result.mode,
@@ -66,7 +87,10 @@ def main() -> None:
         # Screen content (excerpt, selection, error text) only at -v, never at INFO.
         log.debug("check context: %s", check.context)
         if runner:
-            runner.submit(check)
+            if not runner.submit(check) and research:
+                research.write(entry(check) | {"dropped": True})  # Stage 2 busy or loading
+        elif research:
+            research.write(entry(check))
 
     stage1 = Stage1(on_check=on_check)
     record = args.record.open("a", encoding="utf-8") if args.record else None
@@ -113,6 +137,8 @@ def main() -> None:
             await server.close()
             if record:
                 record.close()
+            if research:
+                research.close()
 
     asyncio.run(run())
 

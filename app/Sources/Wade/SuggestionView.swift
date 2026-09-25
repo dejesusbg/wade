@@ -268,6 +268,21 @@ struct ExecutionSettingsView: View {
                     """)
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Toggle("Keep a research log of suggestions and your feedback", isOn: $engine.researchLogEnabled)
+                if engine.researchLogEnabled {
+                    Button("Show Log in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([VerdictLog.defaultURL.deletingLastPathComponent()])
+                    }
+                }
+            } header: {
+                Text("Research log")
+            } footer: {
+                Text("""
+                    Off by default. When on, Wade notes what happened to each suggestion (shown,                     accepted, not helpful, corrected, ignored) with its mode and timing, in a file on                     this Mac, to measure how often Wade is right. It never stores suggestion text,                     corrections or anything from your screen.
+                    """)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

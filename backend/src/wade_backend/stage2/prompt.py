@@ -36,7 +36,18 @@ def _field(label: str, value: str | None, quote: bool = False) -> str | None:
     return f"- {label}: \"{value}\"" if quote else f"- {label}: {value}"
 
 
-def user_message(check: CheckRequest) -> str:
+# The question at the end of the message. "v2" (Phase 3) names "nothing" as an answer, which
+# gives the null family a voice but also primes it on every check. "v3" drops that option and
+# leaves "stay quiet" to the system prompt and the decision rule. Compared in Phase 7.
+QUESTIONS = {
+    "v2": "Which single action would help them most right now? Answer with one verb, "
+          "or \"nothing\" if they are fine on their own.",
+    "v3": "Which single action would help them most right now? Answer with one verb.",
+}
+DEFAULT_VARIANT = "v2"
+
+
+def user_message(check: CheckRequest, variant: str = DEFAULT_VARIANT) -> str:
     ctx = check.context
     lines = [
         _field("App", ctx.get("app")),
@@ -51,6 +62,5 @@ def user_message(check: CheckRequest) -> str:
         f"What's on screen:\n{screen}\n\n"
         f"Recent activity: {check.digest}\n\n"
         f"{AFFORDANCES}\n"
-        "Which single action would help them most right now? Answer with one verb, "
-        "or \"nothing\" if they are fine on their own."
+        f"{QUESTIONS[variant]}"
     )

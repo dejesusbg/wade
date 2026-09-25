@@ -44,6 +44,7 @@ final class ExecutionEngine {
     struct Suggestion: Identifiable {
         let id: String
         let mode: String?
+        let kind: String?
         let concepts: [String]
         var providerName = ""
         var sendsDataOffDevice = false
@@ -91,6 +92,11 @@ final class ExecutionEngine {
     var timeoutSeconds: Double {
         didSet { UserDefaults.standard.set(timeoutSeconds, forKey: Self.timeoutKey) }
     }
+    /// Opt-in verdict log for Phase 7 analysis (no text; see `VerdictLog`).
+    var researchLogEnabled: Bool {
+        didSet { UserDefaults.standard.set(researchLogEnabled, forKey: Self.researchLogKey) }
+    }
+    private let verdicts = VerdictLog()
     static let timeoutRange: ClosedRange<Double> = 1.5...10  // below ~1.5s even the on-device model misses its first answer after launch
     /// Which vendors have a key in the Keychain (for Settings; keys themselves are never held here).
     private(set) var keyed: Set<Vendor> = Set(Vendor.allCases.filter { APIKeyStore.read($0) != nil })
@@ -108,11 +114,13 @@ final class ExecutionEngine {
     private static let primaryKey = "execution.primary"
     private static let fallbackKey = "execution.fallback"
     private static let timeoutKey = "execution.timeout"
+    private static let researchLogKey = "research.log"
 
     init(memory: MemoryModel, integrations: IntegrationsModel) {
         self.memory = memory
         self.integrations = integrations
         let d = UserDefaults.standard
+        researchLogEnabled = d.bool(forKey: Self.researchLogKey)
         primaryID = d.string(forKey: Self.primaryKey).flatMap { ProviderCatalog.find($0)?.id }
             ?? ProviderCatalog.defaultPrimaryID
         let storedTimeout = d.double(forKey: Self.timeoutKey)
@@ -145,7 +153,7 @@ final class ExecutionEngine {
         task?.cancel()
         let prompt = ExecutionPrompt(trigger: trigger, facts: memory.facts, corrections: memory.corrections)
         let chain = chain
-        current = Suggestion(id: trigger.suggestionId, mode: trigger.mode, concepts: trigger.jspaceConcepts)
+        current = Suggestion(id: trigger.suggestionId, mode: trigger.mode, kind: trigger.kind, concepts: trigger.jspaceConcepts)
         log.info("execution: \(chain.map(\.id).joined(separator: " → "), privacy: .public) for \(trigger.kind ?? "?", privacy: .public)/\(trigger.mode ?? "?", privacy: .public)")
 
         let manager = integrations.manager
@@ -204,6 +212,24 @@ final class ExecutionEngine {
 
     var phase: SuggestionSurface.Phase { current?.phase ?? .none }
 
+    /// Append a verdict for the current suggestion, when the research log is on.
+    func note(_ event: Verdict.Event, tools: [String]? = nil) {
+        guard researchLogEnabled, let s = current else { return }
+        var outcome: String?
+        if event == .composed {
+            switch s.status {
+            case .done: outcome = "done"
+            case .dropped: outcome = "dropped"
+            case .failed: outcome = "failed"
+            case .streaming: outcome = nil
+            }
+        }
+        verdicts.append(Verdict(suggestionId: s.id, event: event, mode: s.mode, kind: s.kind, outcome: outcome,
+                                provider: s.providerName.isEmpty ? nil : s.providerName,
+                                firstTokenS: s.firstTokenAfter, totalS: s.finishedAfter,
+                                tools: tools ?? (event == .composed ? s.proposals.map(\.action.tool.name) : nil)))
+    }
+
     func markSeen() {
         guard var s = current, !s.seen else { return }
         s.seen = true
@@ -211,7 +237,10 @@ final class ExecutionEngine {
     }
 
     /// "Thanks": the suggestion was fine. Not stored as a correction; nothing to correct.
-    func accept() { setFeedback(.accepted) }
+    func accept() {
+        setFeedback(.accepted)
+        note(.accepted)
+    }
 
     /// "Not helpful": stored as a rejection, so later suggestions see it.
     func reject() {
@@ -219,6 +248,7 @@ final class ExecutionEngine {
         memory.addCorrection(suggestionId: s.id, suggestion: s.asSuggested,
                              correction: "Not helpful here.", provenance: .rejection)
         setFeedback(.rejected)
+        note(.rejected)
     }
 
     /// "Correct…": what the user said would have helped instead.
@@ -226,6 +256,7 @@ final class ExecutionEngine {
         guard let s = current, s.feedback != .rejected, s.feedback != .corrected, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         memory.addCorrection(suggestionId: s.id, suggestion: s.asSuggested, correction: text, provenance: .correction)
         setFeedback(.corrected)
+        note(.corrected)
     }
 
     private func setFeedback(_ feedback: Feedback) {
@@ -247,8 +278,10 @@ final class ExecutionEngine {
             do {
                 let result = try await manager.call(action.tool, argumentsJSON: action.argumentsJSON)
                 self?.setProposal(proposalID, .done(String(result.prefix(300))))
+                self?.note(.actionDone, tools: [action.tool.name])
             } catch {
                 self?.setProposal(proposalID, .failed(error.localizedDescription))
+                self?.note(.actionFailed, tools: [action.tool.name])
             }
         }
     }
@@ -293,6 +326,7 @@ final class ExecutionEngine {
         c.status = status
         c.finishedAfter = Date().timeIntervalSince(c.startedAt)
         current = c
+        note(.composed)
         log.info("execution done: \(String(describing: status), privacy: .public) via \(c.providerName, privacy: .public) first token \(c.firstTokenAfter ?? -1)s total \(c.finishedAfter ?? -1)s skipped \(c.skipped.count) proposals \(c.proposals.count) tools-ran \(c.toolsRan.count)")
     }
 

@@ -13,6 +13,7 @@ stage2 = ["mlx>=0.32", "mlx-lm>=0.31", "numpy>=2"]
 wade-backend = "wade_backend.__main__:main"
 wade-replay = "wade_backend.replay:main"
 wade-stage2 = "wade_backend.stage2.cli:main"
+wade-eval = "wade_backend.evalset.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

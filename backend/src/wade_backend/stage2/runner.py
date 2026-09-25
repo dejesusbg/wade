@@ -23,13 +23,12 @@ OnResult = Callable[[CheckRequest, "object"], None]
 
 class Stage2Runner:
     def __init__(self, on_result: OnResult, lens_path: Path | None = None) -> None:
-        from .jlens import DEFAULT_PATH
-
-        self.lens_path = lens_path or DEFAULT_PATH
+        self.lens_path = lens_path
         self._on_result = on_result
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="stage2")
         self._busy = threading.Lock()
         self._stage2 = None
+        self.config_label = ""
         self._pool.submit(self._load)
 
     @staticmethod
@@ -40,24 +39,30 @@ class Stage2Runner:
             import mlx_lm  # noqa: F401
         except ImportError:
             return "the stage2 extra isn't installed (uv sync --extra stage2)"
-        from .jlens import DEFAULT_PATH
+        from .check import Stage2Config
 
-        if not (lens_path or DEFAULT_PATH).exists():
-            return f"no J-lens at {lens_path or DEFAULT_PATH} (uv run wade-stage2 build)"
+        path = lens_path or Stage2Config.calibrated_lens()
+        if not path.exists():
+            return f"no J-lens at {path} (uv run wade-stage2 build)"
         return None
 
     def _load(self) -> None:
         from .check import Stage2
 
         log.info("loading Stage 2 model and J-lens …")
-        self._stage2 = Stage2.load(lens_path=self.lens_path)
-        log.info("Stage 2 ready (J-lens layers %s)", self._stage2.jl.layers)
+        self._stage2 = Stage2.load(lens_path=self.lens_path)  # None: the saved calibration
+        cfg = self._stage2.cfg
+        self.config_label = f"{cfg.prompt} layers {','.join(map(str, cfg.layers or self._stage2.jl.layers))} {cfg.rule.label()}"
+        log.info("Stage 2 ready (%s, J-lens layers %s; decision: %s)", self._stage2.jl.meta.get("variant", "lens"),
+                 self._stage2.jl.layers, self.config_label)
 
-    def submit(self, check: CheckRequest) -> None:
+    def submit(self, check: CheckRequest) -> bool:
+        """Queue a check; False if it was dropped because Stage 2 is busy."""
         if not self._busy.acquire(blocking=False):
             log.info("Stage 2 busy; dropped %s check", check.kind)
-            return
+            return False
         self._pool.submit(self._run, check)
+        return True
 
     def _run(self, check: CheckRequest) -> None:
         try:

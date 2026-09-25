@@ -1,0 +1,78 @@
+cases: 55 calibration (80-case set + pipeline scenarios), 39 held-out; 3816 configurations swept, chosen on calibration F0.5 only
+
+Phase 3 rule as shipped (J = I, v2, layers 23/27/32, beat-null t=0.005):
+  calibration  precision   85% [58%–96%]  recall   42% [26%–61%]  mode  100%  (tp 11 fp 2 fn 15 tn 25; either fired 0/2)
+  held-out     precision   71% [36%–92%]  recall   26% [12%–49%]  mode  100%  (tp 5 fp 2 fn 14 tn 15; either fired 0/3)
+
+Best per lens × prompt (J-space rules), chosen on calibration:
+  identity v2  27,32     margin t=0 m=-0.04         | cal F0.5 0.80 P 85% R 65% | held-out F0.5 0.84 P 88% R 74% mode 64%
+  identity v3  27,32     zscore k=2.5 t=0           | cal F0.5 0.85 P 94% R 62% | held-out F0.5 0.76 P 80% R 63% mode 75%
+  learned  v2  27,32     zscore k=5 t=0             | cal F0.5 0.85 P 94% R 62% | held-out F0.5 0.77 P 85% R 58% mode 55%
+  learned  v3  32        zscore k=2.5 t=0           | cal F0.5 0.86 P 90% R 73% | held-out F0.5 0.76 P 80% R 63% mode 83%
+  mix      v2  27,32     margin t=0 m=-0.04         | cal F0.5 0.80 P 85% R 65% | held-out F0.5 0.84 P 88% R 74% mode 64%
+  mix      v3  27,32     zscore k=2.5 t=0           | cal F0.5 0.85 P 94% R 62% | held-out F0.5 0.76 P 80% R 63% mode 75%
+
+Best per rule type (all lenses/prompts), chosen on calibration:
+  learned  v2  27,32     beat-null t=0              | cal F0.5 0.78 P 88% R 54% | held-out F0.5 0.79 P 91% R 53% mode 80%
+  learned  v2  27,32     margin t=0 m=-0.02         | cal F0.5 0.82 P 83% R 77% | held-out F0.5 0.82 P 87% R 68% mode 69%
+  learned  v3  32        zscore k=2.5 t=0           | cal F0.5 0.86 P 90% R 73% | held-out F0.5 0.76 P 80% R 63% mode 83%
+  identity v2  all       output word (control)      | cal F0.5 0.69 P 76% R 50% | held-out F0.5 0.69 P 88% R 37% mode 71%
+
+Best in-sample (pre-stated procedure): learned  v3  32        zscore k=2.5 t=0           | cal F0.5 0.86 P 90% R 73% | held-out F0.5 0.76 P 80% R 63% mode 83%
+  held-out     precision   80% [55%–93%]  recall   63% [41%–81%]  mode   83%  (tp 12 fp 3 fn 7 tn 14; either fired 1/3)
+
+Leave-one-family-out CV on calibration (top 8 by CV F0.5):
+  learned  v3  all       zscore    | CV F0.5 0.80 P 88% R 58% | refit zscore k=4 t=0             | held-out F0.5 0.79 P 91% R 53% mode 70%
+  learned  v3  32        zscore    | CV F0.5 0.80 P 88% R 58% | refit zscore k=2.5 t=0           | held-out F0.5 0.76 P 80% R 63% mode 83%
+  learned  v2  27,32     margin    | CV F0.5 0.79 P 82% R 69% | refit margin t=0 m=-0.02         | held-out F0.5 0.82 P 87% R 68% mode 69%
+  identity v3  32        zscore    | CV F0.5 0.79 P 82% R 69% | refit zscore k=2.5 t=0           | held-out F0.5 0.66 P 69% R 58% mode 82%
+  learned  v2  27,32     zscore    | CV F0.5 0.78 P 84% R 62% | refit zscore k=5 t=0             | held-out F0.5 0.77 P 85% R 58% mode 55%
+  learned  v3  23,27,32  zscore    | CV F0.5 0.78 P 84% R 62% | refit zscore k=4 t=0             | held-out F0.5 0.79 P 91% R 53% mode 70%
+  learned  v3  27,32     zscore    | CV F0.5 0.78 P 84% R 62% | refit zscore k=4 t=0             | held-out F0.5 0.79 P 91% R 53% mode 80%
+  learned  v2  27,32     beat-null | CV F0.5 0.78 P 88% R 54% | refit beat-null t=0              | held-out F0.5 0.79 P 91% R 53% mode 80%
+
+Chosen (robust, by CV on calibration): learned  v3  all       zscore k=4 t=0             | cal F0.5 0.83 P 94% R 58% | held-out F0.5 0.79 P 91% R 53% mode 70%
+  held-out     precision   91% [62%–98%]  recall   53% [32%–73%]  mode   70%  (tp 10 fp 1 fn 9 tn 16; either fired 0/3)
+
+  held-out cases:
+   ✓ excel_ref_error              fire   fixing      → FIRE fixing      | undo 0.031, prompt 0.022, fix 0.018, wyjaśni 0.011
+   ✓ printer_offline              fire   fixing      → FIRE fixing      | prompt 0.019, retry 0.017, resume 0.016, fix 0.013
+   ✓ vpn_fails                    fire   fixing      → FIRE fixing      | retry 0.031, prompt 0.020, pause 0.020, refresh 0.011
+   ✓ zoom_mic_denied              fire   fixing      → FIRE fixing      | prompt 0.019, allow 0.014, resolve 0.012, grant 0.012
+   ✗ figma_export_fails           fire   fixing      → quiet            | prompt 0.022, undo 0.015, pause 0.015, resize 0.014
+   ✗ git_merge_conflict           fire   fixing      → quiet            | prompt 0.023, explain 0.014, undo 0.010, pause 0.009
+   ✗ canvas_upload_fails          fire   fixing      → FIRE coding      | prompt 0.028, download 0.021, resize 0.016, 念头 0.011
+   ✗ gitlab_clone                 fire   coding      → quiet            | prompt 0.022, clone 0.012, 念头 0.012, share 0.011
+   ✗ npm_package_page             fire   coding      → quiet            | prompt 0.019, share 0.016, 念头 0.012, highlight 0.012
+   ✗ hf_model_page                fire   coding      → quiet            | prompt 0.024, share 0.014, pause 0.010, แว 0.010
+   ✗ spanish_paragraph_selected   fire   writing     → quiet            | highlight 0.022, prompt 0.020, summarize 0.018, pause 0.016
+   ✗ kindle_quote_selected        fire   writing     → quiet            | pause 0.021, prompt 0.020, summarize 0.016, highlight 0.014
+   ✓ pubmed_article               fire   researching → FIRE researching | summarize 0.021, prompt 0.020, highlight 0.016, pause 0.015
+   ✗ ssrn_paper                   fire   researching → FIRE coding      | download 0.027, prompt 0.020, 念头 0.013, save 0.013
+   ✓ hotel_results                fire   comparing   → FIRE comparing   | prompt 0.019, compare 0.017, highlight 0.016, 念头 0.010
+   ✓ two_phones_tabs              fire   comparing   → FIRE comparing   | compare 0.028, prompt 0.018, highlight 0.016, pause 0.015
+   ✗ medical_jargon_selected      fire   explaining  → quiet            | highlight 0.025, prompt 0.020, share 0.015, highlighted 0.012
+   ✗ tax_form_selected            fire   explaining  → quiet            | prompt 0.020, highlight 0.016, explain 0.013, pause 0.012
+   ✗ event_page_share             fire   sharing     → FIRE comparing   | share 0.025, prompt 0.021, pause 0.012, compare 0.012
+   ✓ search_results_song          quiet              → quiet            | search 0.023, prompt 0.021, searching 0.018, share 0.013
+   ✓ forum_thread                 quiet              → quiet            | share 0.020, prompt 0.018, pause 0.017, highlight 0.014
+   ✓ encyclopedia_bio             quiet              → quiet            | summarize 0.020, prompt 0.019, highlight 0.013, searching 0.013
+   ✓ github_dashboard             quiet              → quiet            | prompt 0.019, share 0.013, 念头 0.012, explore 0.009
+   ✓ terminal_chat_session        quiet              → quiet            | prompt 0.028, share 0.021, open 0.016, navigate 0.010
+   · search_snippet_selected      either             → quiet            | search 0.021, prompt 0.019, searching 0.017, share 0.012
+   · bio_paragraph_selected       either             → quiet            | summarize 0.020, prompt 0.019, highlight 0.013, 念头 0.011
+   · repo_readme_live             either             → quiet            | prompt 0.024, 念头 0.011, share 0.011, ложить 0.008
+   ✗ email_reply_typing           quiet              → FIRE sharing     | prompt 0.023, pause 0.013, send 0.013, 念头 0.012
+   ✓ notion_editing               quiet              → quiet            | prompt 0.019, 念头 0.013, pause 0.013, improve 0.007
+   ✓ figma_designing              quiet              → quiet            | prompt 0.020, undo 0.016, 念头 0.010, pause 0.010
+   ✓ excel_data_entry             quiet              → quiet            | prompt 0.021, improve 0.014, pause 0.013, 念头 0.011
+   ✓ whatsapp_chat                quiet              → quiet            | pause 0.024, prompt 0.019, 聊天 0.013, 念头 0.012
+   ✓ netflix_watching             quiet              → quiet            | pause 0.027, prompt 0.019, skip 0.015, share 0.011
+   ✓ duolingo_lesson              quiet              → quiet            | translate 0.027, prompt 0.022, pause 0.017, 念头 0.012
+   ✓ instagram_scroll             quiet              → quiet            | prompt 0.019, pause 0.015, scroll 0.011, 念头 0.010
+   ✓ maps_directions              quiet              → quiet            | pause 0.026, prompt 0.019, navigate 0.016, 念头 0.011
+   ✓ audit_reading_book           quiet              → quiet            | summarize 0.023, prompt 0.020, pause 0.018, 念头 0.012
+   ✓ zoom_in_meeting              quiet              → quiet            | pause 0.030, prompt 0.019, share 0.011, mute 0.011
+   ✓ one_off_dialog_other         quiet              → quiet            | prompt 0.032, recover 0.015, confirm 0.008, re 0.007
+
+  by family: other-stuck 4/7, other-opportunity 3/12, live 8/8, other-routine 11/12

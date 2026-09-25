@@ -68,6 +68,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         // Seen only when the user looks on purpose; an auto-open that closes untouched leaves
         // the icon filled, so the suggestion isn't lost.
         if !automatically { model.execution.markSeen() }
+        if id != nil { model.execution.note(automatically ? .shownAuto : .opened) }
         autoCloseTask?.cancel()
         if automatically { scheduleAutoClose() }
     }
@@ -81,6 +82,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                frame.contains(NSEvent.mouseLocation) {
                 self.scheduleAutoClose()
             } else {
+                if self.model.execution.current?.seen == false { self.model.execution.note(.closedUnseen) }
                 self.close()
             }
         }

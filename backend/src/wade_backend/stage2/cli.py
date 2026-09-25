@@ -64,10 +64,11 @@ def _print_validation(v: dict) -> None:
 
 def cmd_eval(args) -> None:
     from .check import Stage2, Stage2Config
+    from .rules import Rule
 
     layers = tuple(int(x) for x in args.layers.split(",")) if args.layers else None
     stage2 = Stage2.load(args.repo, Path(str(args.lens)),
-                         Stage2Config(threshold=args.threshold, positions=args.positions, layers=layers))
+                         Stage2Config(rule=Rule("beat-null", t=args.threshold), positions=args.positions, layers=layers))
     if stage2.split_anchors:
         print(f"note: anchors that aren't single tokens (can't be read directly): {stage2.split_anchors}")
     stage2.evaluate(_checks_for("repo_page")[0])  # warm-up (compile, caches)
