@@ -344,6 +344,8 @@ before its first word.
   2s → simulated **Do it** → the filesystem server wrote the note, 5 of 5 runs.
 - In the app (`--sample-note`): Wade starts the filesystem server itself, and the suggestion
   arrives with 1 proposal.
+- In the app, by hand (2026-09-25): menu → Try a Sample Note Action → **Do it** wrote
+  `~/Documents/Wade/2026-09-25 1226 Medical Image Analysis.md` through the filesystem server.
 
 - GitHub, headless (`wade-exec-check github-e2e <owner/repo> [provider]`), on `ml-explore/mlx`:
   on-device proposed `fork_repository` in 2.8s, and Gemini Flash-Lite in 5.9s. The fork was only
