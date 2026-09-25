@@ -5,8 +5,8 @@
 #   scripts/overnight-jlens.sh            # start (or resume) in the background
 #   tail -f ~/Library/Logs/Wade/jlens-build.log
 #
-# ~120 prompts x 32 tokens; 45s pause after each prompt, 2 min after every 5th (GPU busy ~75%
-# of the time, to limit heat): roughly 8.5 hours. Progress is
+# ~120 prompts x 32 tokens; 1 min pause after each prompt, 2 min after every 5th (GPU busy ~70%
+# of the time, to limit heat): roughly 8 hours. Progress is
 # checkpointed after every prompt, so re-running resumes; the checkpoint is kept after the
 # save (delete it by hand once the lens is verified). Writes jlens-learned.npz (the
 # J = I lens in use stays untouched) and prints J-lens vs logit-lens validation at the end.
@@ -24,5 +24,5 @@ echo "=== $(date) starting (resumes from checkpoint if present)" >> "$LOG"
 
 # -i: no idle sleep, -s: no system sleep on AC. The display is allowed to sleep.
 nohup caffeinate -is env PYTHONUNBUFFERED=1 uv run wade-stage2 build \
-  --prompts 120 --max-tokens 32 --cooldown 45 --long-cooldown 120 --long-every 5 --out "$OUT" >> "$LOG" 2>&1 &
+  --prompts 120 --max-tokens 32 --cooldown 60 --long-cooldown 120 --long-every 5 --out "$OUT" >> "$LOG" 2>&1 &
 echo "started (pid $!); log: $LOG"
