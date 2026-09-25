@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 6 (menu bar suggestion UI) built and tried by hand; awaiting check-in before Phase 7
+## Status: Phase 6 (menu bar suggestion UI) done (2026-09-25); awaiting check-in before Phase 7
 
 ### Open items carried forward
 
@@ -429,12 +429,15 @@ Phase 4 "Wade Suggestion" window is gone. There's no hotkey, which v1 dropped.
 - Sample repo suggestion: **Not helpful** stored `user_rejection` "Not helpful here."
 - A second one: **Correct…** stored `user_correction` "just show me the latest release".
 
-**Not yet seen live:**
-- The icon states with the backend running. The dashed circle, with the backend down, was
-  confirmed.
-- Whether focus stays in the app you're typing in when the popover opens by itself.
-- A real Stage 2 fire reaching the popover: it goes through the same `execution.run` path as
-  the samples, but no live fire has happened yet (see Open items).
+- With the backend running (`--sample-suggestion --sample-delay 30`):
+  - Icons, in order: plain circle while watching → dotted while writing → filled when the popover
+    opened by itself → still filled after it closed untouched → plain again after you opened it.
+  - **Typing kept focus** in the other app when the popover opened by itself.
+- Seen rule, fixed during this check: an auto-opened popover no longer counts as seen, so
+  untouched suggestions keep the filled icon.
+
+**Not yet seen live:** a real Stage 2 fire reaching the popover. It goes through the same
+`execution.run` path as the samples, but no live fire has happened yet (see Open items).
 
 ### What the app observes
 

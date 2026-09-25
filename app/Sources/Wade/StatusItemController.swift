@@ -65,7 +65,9 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             // Auto-opened without activating Wade, so whatever the user is typing keeps focus.
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
-        model.execution.markSeen()
+        // Seen only when the user looks on purpose; an auto-open that closes untouched leaves
+        // the icon filled, so the suggestion isn't lost.
+        if !automatically { model.execution.markSeen() }
         autoCloseTask?.cancel()
         if automatically { scheduleAutoClose() }
     }
@@ -86,6 +88,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     private func userEngaged() {
         autoCloseTask?.cancel()
+        model.execution.markSeen()
     }
 
     func close() {

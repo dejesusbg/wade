@@ -25,7 +25,8 @@ public enum SuggestionSurface {
         }
     }
 
-    /// `seen`: the user has opened the popover for this suggestion (or it opened itself).
+    /// `seen`: the user opened the popover for this suggestion or clicked inside it (an auto-open
+    /// that closes untouched doesn't count).
     public static func icon(observing: Bool, phase: Phase, seen: Bool) -> Icon {
         guard observing else { return .notObserving }
         switch phase {

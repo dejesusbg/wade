@@ -68,15 +68,16 @@ final class AppModel {
                                                queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.integrations.stop() }
         }
-        // Developer hook: `open Wade.app --args --sample-suggestion` runs the sample trigger
-        // through the real execution engine (same as the menu's "Try a Sample Suggestion").
-        if CommandLine.arguments.contains("--sample-suggestion") {
-            Task { @MainActor [weak self] in self?.execution.runSample() }
-        }
-        if CommandLine.arguments.contains("--sample-note") {
+        // Developer hooks: `open Wade.app --args --sample-suggestion` (or `--sample-note`) runs a
+        // sample trigger through the real execution engine, like the popover's "Try a Sample…".
+        // `--sample-delay <seconds>` (default 3) gives time to switch to another app first.
+        let args = CommandLine.arguments
+        let delay = args.firstIndex(of: "--sample-delay").flatMap { args.indices.contains($0 + 1) ? Double(args[$0 + 1]) : nil } ?? 3
+        if args.contains("--sample-suggestion") || args.contains("--sample-note") {
+            let note = args.contains("--sample-note")
             Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(3))  // let the MCP servers start
-                self?.execution.runSampleNote()
+                try? await Task.sleep(for: .seconds(delay))  // also lets the MCP servers start
+                if note { self?.execution.runSampleNote() } else { self?.execution.runSample() }
             }
         }
     }
