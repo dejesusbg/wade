@@ -193,6 +193,11 @@ uv run wade-stage2 eval -v              # synthetic scenarios → Stage 2 → mo
   - Early-layer J-space reads the same concepts on *every* check ("prompt", 念头, "quiet",
     "suggestion", "ready"): it tracks the **task framing** ("suggest or stay quiet?"), not the
     user's situation. That's a finding for Phase 7 and the write-up, not a bug.
+- **Archive:** `~/Library/Application Support/Wade/jlens-learned-120prompts.checkpoint.npz`
+  (131 MB) holds the raw Jacobian sums for all 120 prompts. It's verified to match
+  `jlens-learned.npz`. It can be **extended** rather than recomputed: copy it to
+  `jlens-learned.checkpoint.npz` and run the build with `--prompts 240`, and the resume logic skips
+  the first 120.
 - **Latency target** (brief §10): p95 ≤ 1s per Stage 2 check on the M5. Measured: median
   369ms, p95 ~380ms with J = I; about 465ms with a learned J at all layers.
 
