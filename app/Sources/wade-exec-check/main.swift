@@ -12,6 +12,27 @@ import WadeIPC
 let arg = CommandLine.arguments.dropFirst().first ?? ProviderCatalog.defaultPrimaryID
 func out(_ s: String) { FileHandle.standardOutput.write(Data(s.utf8)) }
 
+if arg == "gemini-models" {
+    // Which Gemini models this key can call for streaming text (key from the Keychain, sent in a
+    // header, never printed).
+    guard let key = APIKeyStore.read(.google) else { out("no Gemini key in the Keychain\n"); exit(1) }
+    var r = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")!)
+    r.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+    let (data, response) = try await URLSession.shared.data(for: r)
+    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+    guard status == 200, let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let models = json["models"] as? [[String: Any]] else {
+        out("HTTP \(status): \(String(data: data, encoding: .utf8)?.prefix(300) ?? "")\n"); exit(1)
+    }
+    for m in models {
+        let name = (m["name"] as? String ?? "").replacingOccurrences(of: "models/", with: "")
+        let methods = m["supportedGenerationMethods"] as? [String] ?? []
+        guard name.contains("flash"), methods.contains("streamGenerateContent") || methods.contains("generateContent") else { continue }
+        out("\(name.padding(toLength: 40, withPad: " ", startingAt: 0)) \(m["displayName"] as? String ?? "")\n")
+    }
+    exit(0)
+}
+
 if arg == "list" {
     for d in ProviderCatalog.all {
         let key = !d.vendor.needsKey ? "no key needed" : (APIKeyStore.read(d.vendor) == nil ? "NO KEY" : "key ok")
@@ -19,7 +40,12 @@ if arg == "list" {
     }
     exit(0)
 }
-guard let descriptor = ProviderCatalog.find(arg) else { out("unknown id \(arg); try `list`\n"); exit(2) }
+guard var descriptor = ProviderCatalog.find(arg) else { out("unknown id \(arg); try `list`\n"); exit(2) }
+// Optional second argument overrides the model id (e.g. to try a pinned Gemini version).
+if let model = CommandLine.arguments.dropFirst(2).first {
+    descriptor = ProviderDescriptor(id: descriptor.id, vendor: descriptor.vendor, route: descriptor.route,
+                                    model: model, title: "\(descriptor.title) [\(model)]", setupRequired: descriptor.setupRequired)
+}
 
 let prompt = ExecutionPrompt(
     trigger: TriggerFired(

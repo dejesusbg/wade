@@ -154,15 +154,20 @@ private struct FakeProvider: ExecutionProvider {
     let sendsDataOffDevice = false
     let chunks: [String]
     let failAfter: Int?  // throw after this many chunks
+    var delay: Duration = .zero  // before the first chunk
 
     func generate(prompt: ExecutionPrompt, tools: [MCPTool]) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { c in
+        let (chunks, failAfter, delay) = (chunks, failAfter, delay)
+        return AsyncThrowingStream { c in
+          Task {
+            if delay > .zero { try? await Task.sleep(for: delay) }
             for (i, chunk) in chunks.enumerated() {
                 if failAfter == i { c.finish(throwing: ExecutionError.stream(type: "boom", message: "")); return }
                 c.yield(chunk)
             }
             if failAfter == chunks.count { c.finish(throwing: ExecutionError.stream(type: "boom", message: "")); return }
             c.finish()
+          }
         }
     }
 }
@@ -172,10 +177,11 @@ private struct FakeProvider: ExecutionProvider {
     private let b = ProviderCatalog.find("apple.on-device")!
     private let prompt = ExecutionPrompt(trigger: trigger(), facts: [], corrections: [])
 
-    private func collect(_ resolve: @escaping ProviderChain.Resolver) async -> (events: [ProviderChain.Event], error: Bool) {
+    private func collect(timeout: Duration = .seconds(8),
+                         _ resolve: @escaping ProviderChain.Resolver) async -> (events: [ProviderChain.Event], error: Bool) {
         var out: [ProviderChain.Event] = []
         do {
-            for try await e in ProviderChain.run([a, b], prompt: prompt, resolve: resolve) { out.append(e) }
+            for try await e in ProviderChain.run([a, b], prompt: prompt, firstTokenTimeout: timeout, resolve: resolve) { out.append(e) }
             return (out, false)
         } catch {
             return (out, true)
@@ -196,6 +202,14 @@ private struct FakeProvider: ExecutionProvider {
             .success(FakeProvider(displayName: d.id, chunks: d.id == a.id ? [] : ["ok"], failAfter: d.id == a.id ? 0 : nil))
         }
         #expect(r.events.contains(.text("ok")) && !r.error)
+    }
+
+    @Test func slowPrimaryTimesOutToFallback() async {
+        let r = await collect(timeout: .milliseconds(200)) { d in
+            .success(FakeProvider(displayName: d.id, chunks: [d.id == a.id ? "late" : "fast"], failAfter: nil,
+                                  delay: d.id == a.id ? .seconds(5) : .zero))
+        }
+        #expect(r.events.contains(.text("fast")) && !r.events.contains(.text("late")) && !r.error)
     }
 
     @Test func noSwitchingMidSentence() async {

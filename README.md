@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 4 (execution layer) in progress: Gemini direct route awaiting a key to test
+## Status: Phase 4 (execution layer) done, check-in pending before Phase 5
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -242,7 +242,24 @@ protocol:
 - **Measured, Apple on-device:** first words in **1.2–1.5s**, done in **1.3–1.7s**, both headless
   and inside the app. Output: *"Clone the repository using the web URL:
   https://github.com/dejesusbg/monet.git."*
+- **No-text timeout:** `ProviderChain` skips any provider that produces no text within **8s**
+  (a late suggestion is useless) and moves to the next entry. Same rule for every provider.
+- **Gemini, tested live (2026-09-25):**
+  - The key can use `gemini-flash-latest`, `gemini-3.8-flash`, `gemini-3.5-flash`,
+    `gemini-flash-lite-latest` and others (`wade-exec-check gemini-models`).
+  - `gemini-2.5-flash` returns 404 for new keys. Google's message recommends its newer
+    Interactions API.
+  - **The wire is verified**: `gemini-flash-lite-latest` streamed *"Clone it with `git clone
+    https://github.com/dejesusbg/monet.git`."*, with incremental chunks and `thoughtSignature`
+    parts skipped. But the first token took 14s.
+  - Full Flash models returned **503 "high demand"** repeatedly. Flash-Lite later hit the 8s
+    timeout.
+  - In the app, the default chain skipped Gemini and the on-device model wrote the suggestion:
+    first text after 9.4s (the 8s timeout plus about 1.3s on-device).
 - **Dev tools:** `swift run wade-exec-check list` shows the catalog and key status;
+  `wade-exec-check gemini-models` lists the Flash models the key can call;
+  `wade-exec-check <id> [model]` overrides the model; `WADE_DEBUG_SSE=1` prints the raw stream.
+  More:
   `swift run wade-exec-check <id>` streams the sample (keys from the Keychain);
   `open build/Wade.app --args --sample-suggestion` runs it inside the app.
 - **Bug found end to end:** a Swift exclusivity crash in the engine (reading and writing

@@ -38,6 +38,15 @@ public struct ProviderDescriptor: Identifiable, Hashable, Sendable {
     /// Set when the entry can't run yet, and why (e.g. Firebase not configured).
     public let setupRequired: String?
 
+    public init(id: String, vendor: Vendor, route: Route, model: String, title: String, setupRequired: String?) {
+        self.id = id
+        self.vendor = vendor
+        self.route = route
+        self.model = model
+        self.title = title
+        self.setupRequired = setupRequired
+    }
+
     public var sendsDataOffDevice: Bool { vendor != .apple }
 
     /// A provider ready to run, or the reason it can't (missing key, setup not done).
@@ -64,6 +73,8 @@ public enum ProviderCatalog {
     public static let all: [ProviderDescriptor] = [
         ProviderDescriptor(id: "google.gemini-flash.direct", vendor: .google, route: .directAPI,
                            model: "gemini-flash-latest", title: "Gemini Flash (direct API)", setupRequired: nil),
+        ProviderDescriptor(id: "google.gemini-flash-lite.direct", vendor: .google, route: .directAPI,
+                           model: "gemini-flash-lite-latest", title: "Gemini Flash-Lite (direct API)", setupRequired: nil),
         ProviderDescriptor(id: "google.gemini-flash.afm", vendor: .google, route: .foundationModels,
                            model: "gemini-flash-latest", title: "Gemini Flash (Foundation Models)",
                            setupRequired: "Needs a Firebase project, App Check and GoogleService-Info.plist (Firebase AI Logic). Not set up yet."),

@@ -39,7 +39,9 @@ public struct DirectAPIProvider: ExecutionProvider {
                         throw wire.httpError(status: status, body: body)
                     }
                     var parser = SSEParser()
+                    let debug = ProcessInfo.processInfo.environment["WADE_DEBUG_SSE"] == "1"
                     for try await line in bytes.lines {
+                        if debug { FileHandle.standardError.write(Data("[sse] \(line.prefix(240))\n".utf8)) }
                         // `lines` drops the blank line that ends an SSE event; each event from
                         // these APIs has a single `data:` line, so a data line completes it.
                         _ = parser.feed(line)
