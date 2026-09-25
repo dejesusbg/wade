@@ -14,7 +14,7 @@ backend/   Python interpretability core (uv project).
              synthetic  scenario builder + scenario library (expected/forbidden moments)
 ```
 
-## Status: Phase 6 (menu bar suggestion UI) done (2026-09-25); awaiting check-in before Phase 7
+## Status: Phase 7 (evaluation harness) in progress: calibrated, live real-trigger run pending
 
 ### Open items carried forward
 
@@ -22,17 +22,14 @@ Deferred on purpose, so the phases stay in order. Each names the phase that owns
 
 - **Phase 5 goal, real-trigger part (open).** No real Stage 2 fire has yet carried through to a
   completed action. The tool path is verified with a made-up trigger (in-app **Do it** wrote a
-  note). The live run (11 real checks, 0 fires) is in the Phase 5 notes. Close this once
-  Phase 7 calibration makes opportunity moments fire.
-- **Phase 7: Stage 2 calibration.** On real pages and selections, "nothing" always matches or
-  beats every action family. Calibrate the threshold and null-family margin against the
-  evaluation harness, with held-out scenarios, not against a handful of live examples.
-- **Phase 7: fair J = I vs learned J-lens comparison.** Same scenarios, same thresholds,
-  latency included. See the overnight learned-J notes (Phase 3). The 120-prompt checkpoint is
-  archived at `~/Library/Application Support/Wade/jlens-learned-120prompts.checkpoint.npz`.
-- **Small Phase 5 bugs:**
-  - The on-device text said "Clone" while its button would fork.
-  - `list_releases` failed once, with the cause not captured. `github-e2e` now logs arguments.
+  note). The first live run (11 real checks, 0 fires) is in the Phase 5 notes. The live run
+  with the Phase 7 calibration is pending.
+- **Done in Phase 7 (details below):**
+  - Stage 2 calibration against a labeled, family-split evaluation set.
+  - The fair J = I vs learned J-lens comparison.
+  - The "Clone" text / fork button mismatch.
+- **Not reproduced:** `list_releases` failed once in Phase 5. In about 15 later runs it never
+  failed, and `github-e2e` logs call arguments and errors in case it recurs.
 
 Phase 1 (SwiftUI shell) was completed and verified on-device on 2026-09-23.
 
@@ -46,7 +43,7 @@ cd backend && uv sync && uv run wade-backend
 cd app && scripts/bundle.sh && open build/Wade.app
 ```
 
-Tests: `cd app && swift test` (16) and `cd backend && uv run pytest` (47).
+Tests: `cd app && swift test` (49) and `cd backend && uv run pytest` (75).
 Headless IPC check: `cd app && swift build && .build/debug/wade-ipc-check`.
 
 Menu bar icon:
@@ -145,7 +142,7 @@ cd backend && uv run wade-backend --record ~/wade-session.jsonl   # -v logs ever
 uv run wade-replay ~/wade-session.jsonl [--all]
 ```
 
-### Stage 2: J-lens trigger (Phase 3, in progress)
+### Stage 2: J-lens trigger (Phase 3; calibrated in Phase 7)
 
 The model is `mlx-community/Qwen3-4B-Instruct-2507-4bit`, loaded in 0.7s and run block by block.
 Install it with `uv sync --extra stage2`. Stage 2 is optional: without it the backend runs
@@ -438,6 +435,116 @@ Phase 4 "Wade Suggestion" window is gone. There's no hotkey, which v1 dropped.
 
 **Not yet seen live:** a real Stage 2 fire reaching the popover. It goes through the same
 `execution.run` path as the samples, but no live fire has happened yet (see Open items).
+
+### Evaluation harness (Phase 7)
+
+```sh
+uv run wade-eval cases                                  # the labeled set
+uv run wade-eval collect --lens identity --prompt v2    # one model pass per lens × prompt (~1 min)
+uv run wade-eval report [--save]                        # calibrate on one half, score the other
+uv run wade-eval timing                                 # latency of the saved configuration
+uv run wade-eval verdicts                               # real use: research logs joined
+```
+
+**The evaluation set** (`backend/src/wade_backend/evalset/cases.py`):
+- **80 hand-written moments.** Each is what Stage 1 would hand Stage 2: the moment kind, the
+  screen context and a digest in the template's own wording. None of it comes from your
+  screen.
+- **Labels were written before any run**, from one rule: *fire* only when a specific action
+  would plausibly be welcome right now. *either* cases (a README with no Clone panel, a
+  selection while reading) count in no score.
+- **Split by situation family, not at random** (the §8 generalization risk):
+  - *Calibration (41 cases):* developer errors and routine work, GitHub, documents, papers,
+    shopping, everyday apps.
+  - *Held-out (39 cases):* non-developer errors (spreadsheet, printer, VPN, Zoom, Figma, git
+    merge, a campus upload); opportunities on unseen sites (GitLab, npm, Hugging Face, PubMed,
+    SSRN, hotels, phones, Spanish text, medical and tax text); everyday apps the calibration
+    half never shows; and **pages like the first live run's** (search results, a forum thread,
+    an encyclopedia article, the GitHub dashboard, this terminal).
+- The 14 Stage 1 pipeline scenarios join the calibration half, since Phase 3 already saw them.
+
+**How it runs:**
+- One forward pass per case per lens × prompt keeps every lens layer's family scores, so
+  layers, rules and thresholds are swept **offline**. That's 3,816 configurations from 4 GPU
+  runs of about 1 minute each. The "mix" lens is assembled from two runs.
+- **Rules** (`stage2/rules.py`):
+  - *beat-null*: the Phase 3 rule.
+  - *margin*: best family − "nothing" ≥ m.
+  - *z-score*: each family against its own level on quiet calibration cases.
+  - The model's own next word, as a **control**.
+- **Prompts:** v2 (Phase 3, names "nothing" as an answer) and v3 (leaves that out).
+- **Objective:** F0.5 on fire/quiet, so precision counts twice recall, because a wrong
+  interruption costs more trust than a missed one.
+- **Intervals:** 95% Wilson.
+
+**Results (2026-09-25, full report in `backend/eval/report-2026-09-25.txt`).** Held-out,
+36 labeled cases:
+
+| configuration | precision | recall | right mode |
+|---|---|---|---|
+| Phase 3 rule as shipped (J = I, v2, 23/27/32, beat-null) | 71% [36–92] | 26% [12–49] | 100% |
+| control: the model's own next word | 88% | 37% | 71% |
+| J = I, v2, 27/32, margin −0.04 | 88% [64–97] | 74% [51–88] | 64% |
+| in-sample pick: learned J, v3, 32, z-score k=2.5 | 80% [55–93] | 63% [41–81] | 83% |
+| **deployed, the CV pick: learned J, v3, all layers, z-score k=4** | **91% [62–98]** | **53% [32–73]** | 70% |
+
+**What it shows:**
+- **J-space adds something over asking the model.** At the same ~88% precision, a J-space rule
+  finds about twice the moments the model's own answer does (74% vs 37%). That's the project's
+  core thesis, supported on held-out data for the first time. With n = 36 the intervals are
+  wide, so it's evidence, not proof.
+- **The Phase 3 rule was far too quiet.** "Nothing" is named in the prompt and leads on almost
+  every check, which is why the first live run fired 0 times.
+- **Learned J vs J = I, the fair comparison: no meaningful difference** at the layers that
+  decide. Configurations of both trade places within the intervals, and the early layers
+  13/18 (the learned J's strength in validation) were never selected.
+  - The learned J does read cleaner whole-word verbs (retry, allow, grant, clone, save,
+    compare).
+  - But **"share"** lights up almost everywhere on held-out pages, and that caused the
+    in-sample pick's false fires (a forum thread, a terminal, an email).
+- **Calibration overfits.** Among thousands of near-tied configurations, the best in-sample
+  one lost 0.10 F0.5 on held-out.
+  - So the deployed configuration is chosen by **leave-one-family-out cross-validation within
+    the calibration half**: each family is predicted by parameters fitted on the others.
+  - That criterion was added **after** the first held-out look. The held-out numbers above are
+    therefore no longer a clean test of it. Clean evidence has to come from new data, i.e. the
+    research log in real use.
+- **Deployed behavior, precision first.** It fires on recurring errors, comparison pages and
+  some paper pages. It stays quiet on **8 of 8 live-style pages** and 11 of 12 everyday ones.
+  It **misses text selections** (translate, explain, cite) and most package pages. That's the
+  open weakness.
+- **Fragility:** "comparing" never appears on quiet calibration cases, so its z-score uses the
+  spread floor, and any clear "compare" reading fires.
+- **Latency** (deployed, 94 checks): median **465ms**, p95 **555ms**, max 1.2s. The target is
+  p95 ≤ 1s.
+- **Deployed config:** `~/Library/Application Support/Wade/stage2-calibration.json`, with a
+  snapshot in `backend/eval/`. The backend loads the lens and rule together, since a rule
+  calibrated on one lens means nothing on another. Without the file it falls back to the
+  Phase 3 default.
+- **The "why" line** now lists action-family concepts first ("fix, explain" before
+  task-framing tokens like "prompt" or 念头 "thought").
+
+**Research log (opt-in, off by default, no screen text):**
+- Backend: `uv run wade-backend --eval-log` appends each check and Stage 2 decision to
+  `~/Library/Application Support/Wade/eval/checks.jsonl`. It records app, domain, kind,
+  scores, concepts and latency; never excerpts, selections, titles or the digest.
+- App: Settings → Suggestions → **Research log** writes `verdicts.jsonl`: shown (auto or
+  opened), ignored, accepted, rejected, corrected, action done or failed. It records mode,
+  timings, provider and proposed tool names; never suggestion or correction text.
+- `wade-eval verdicts` joins them on `suggestion_id`. It reports checks per hour, the fire rate
+  per kind, and a real-use **welcome rate** (accepted ÷ judged, where ignored counts neither
+  way).
+- Tests assert that a check full of a made-up secret logs none of it.
+
+**Also fixed in Phase 7:**
+- **Text vs button.** The on-device model's text now names the proposed action: "Fork
+  repository …" in 7 of 7 runs, from 0 of 5. The tool result spells out the exact action the
+  button runs, and the prompt's "The error means …" example only applies when an error is on
+  screen.
+- **Note overwrites.** Note filenames now include seconds, because two notes with the same
+  title in the same minute overwrote each other.
+- **Lock screen.** The observer ignores it (`loginwindow`, screen saver): a locked Mac was
+  producing "settled" checks.
 
 ### What the app observes
 

@@ -24,6 +24,10 @@ final class ActivityObserver {
     private let emit: (TKGEvent) -> Void
     private let log = Logger(subsystem: "wade", category: "observer")
     private let ownBundleId = Bundle.main.bundleIdentifier
+    /// Never observed: Wade itself, and the lock screen / screen saver (nothing to help with there,
+    /// and a locked Mac isn't "settled" on anything).
+    private lazy var ignoredBundleIds: Set<String> = Set([ownBundleId, "com.apple.loginwindow",
+                                                           "com.apple.ScreenSaver.Engine"].compactMap { $0 })
 
     private var running = false
     private var workspaceToken: NSObjectProtocol?
@@ -145,7 +149,7 @@ final class ActivityObserver {
     }
 
     private func emitFocusIfChanged(cause: String) {
-        guard bundleId != ownBundleId else { return }
+        guard !ignoredBundleIds.contains(bundleId) else { return }
         // Right after activation the app may not report its focused window yet; by now it usually
         // does. Same for an alert shown *as* the app activates: it can land before we attached.
         if let title = readFocusedWindowTitle() { windowTitle = title }
@@ -409,7 +413,7 @@ final class ActivityObserver {
 
     private func send(_ type: TKGEventType, timestamp: Double = Date().timeIntervalSince1970,
                       metadata: [String: MetadataValue] = [:]) {
-        guard bundleId != ownBundleId else { return }
+        guard !ignoredBundleIds.contains(bundleId) else { return }
         emit(TKGEvent(eventType: type, timestamp: timestamp, appBundleId: bundleId,
                       windowTitle: windowTitle, metadata: metadata))
     }
